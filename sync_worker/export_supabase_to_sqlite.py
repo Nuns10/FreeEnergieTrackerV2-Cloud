@@ -39,19 +39,30 @@ def main() -> None:
                     "WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position",
                     (table,),
                 )
-                columns = [row[0] for row in cursor.fetchall()]
+                remote_columns = [row[0] for row in cursor.fetchall()]
+                local_columns = [
+                    row[1]
+                    for row in local.execute(
+                        f'PRAGMA table_info("{table.replace(chr(34), chr(34)*2)}")'
+                    ).fetchall()
+                ]
+                columns = [column for column in remote_columns if column in local_columns]
                 if not columns:
                     continue
                 quoted_cols = ", ".join(f'"{c.replace(chr(34), chr(34)*2)}"' for c in columns)
                 quoted_table = table.replace('"', '""')
-                local.execute(f'CREATE TABLE IF NOT EXISTS "{quoted_table}" ({quoted_cols})')
                 local.execute(f'DELETE FROM "{quoted_table}"')
-                cursor.execute(sql.SQL("SELECT * FROM {}").format(sql.Identifier(table)))
+                cursor.execute(
+                    sql.SQL("SELECT {} FROM {}").format(
+                        sql.SQL(", ").join(map(sql.Identifier, columns)),
+                        sql.Identifier(table),
+                    )
+                )
                 rows = cursor.fetchall()
                 if rows:
                     placeholders = ",".join("?" for _ in columns)
                     local.executemany(
-                        f'INSERT INTO "{quoted_table}" VALUES ({placeholders})', rows
+                        f'INSERT INTO "{quoted_table}" ({quoted_cols}) VALUES ({placeholders})', rows
                     )
                 local.commit()
                 print(f"Restauration {table}: {len(rows)} ligne(s)")
