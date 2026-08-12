@@ -364,10 +364,23 @@ def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
         .map(e => {
           const r=e.getBoundingClientRect();
           let node=e, color='';
+          const usefulColor = value => {
+            const m=(value||'').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if(!m) return false;
+            const rgb=[+m[1],+m[2],+m[3]], hi=Math.max(...rgb), lo=Math.min(...rgb);
+            return hi-lo>45 && !(hi>235 && lo>220);
+          };
+          const colorsOf = element => {
+            const s=getComputedStyle(element);
+            return [s.backgroundColor,s.borderLeftColor,s.borderTopColor,s.color,s.fill,s.stroke]
+              .filter(usefulColor);
+          };
+          // Le statut est souvent porté par une petite pastille enfant et non
+          // par la ligne du rendez-vous elle-même.
+          const descendants=[...e.querySelectorAll('*')].filter(visible);
+          color=descendants.flatMap(colorsOf)[0] || '';
           for(let depth=0; depth<5 && node; depth++, node=node.parentElement){
-            const s=getComputedStyle(node);
-            const candidates=[s.backgroundColor,s.borderLeftColor,s.borderColor];
-            color=candidates.find(c => c && c!=='rgba(0, 0, 0, 0)' && c!=='transparent' && c!=='rgb(255, 255, 255)') || color;
+            color=colorsOf(node)[0] || color;
             if(color) break;
           }
           return {text:(e.innerText||'').replace(/\\s+/g,' ').trim(),x:r.x,y:r.y,color};
