@@ -159,7 +159,9 @@ def apply_target_statuses(page: Page) -> None:
     for index in range(options.count()):
         option = options.nth(index)
         try:
-            label = normalize(option.inner_text())
+            # text_content() reste fiable dans Chromium sans écran, alors que
+            # inner_text() peut échouer pendant l'animation de l'overlay.
+            label = normalize(option.text_content())
         except Exception:
             continue
 
