@@ -1,0 +1,47 @@
+name: Synchronisation calendrier direction
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 * * * *"
+
+concurrency:
+  group: synchronisation-crm-supabase
+  cancel-in-progress: false
+
+jobs:
+  calendrier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CRM_STORAGE_STATE_B64: ${{ secrets.CRM_STORAGE_STATE_B64 }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r sync_worker/requirements-sync.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Restaurer la base depuis Supabase
+        run: python sync_worker/export_supabase_to_sqlite.py data/leads.sqlite
+
+      - name: Synchroniser les rendez-vous passés et à venir
+        run: python sync_worker/calendar_sync.py --weeks-back 8 --weeks-forward 8
+
+      - name: Publier les rendez-vous dans Supabase
+        run: python sync_worker/migrate_sqlite_to_supabase.py data/leads.sqlite --replace
+
