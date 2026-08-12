@@ -338,13 +338,16 @@ def classify_color(color_hex: str | None, event_date: str) -> str:
     red = int(color_hex[1:3], 16)
     green = int(color_hex[3:5], 16)
     blue = int(color_hex[5:7], 16)
+    # Code couleur métier du calendrier CRM :
+    # vert = effectué, bleu = non débriefé, rouge = annulé,
+    # violet = non effectué.
     if green > red * 1.10 and green > blue * 1.05:
         return "completed"
     if blue > red * 1.08 and blue >= green:
         return "pending_debrief"
-    if red > 145 and green > 105 and blue < 115:
-        return "pending_debrief"
-    if (red > green * 1.18 and red > blue * 1.10) or (red > 100 and blue > 100 and green < min(red, blue) * .85):
+    if red > 90 and blue > 90 and green < min(red, blue) * .82:
+        return "not_completed"
+    if red > green * 1.18 and red > blue * 1.10:
         return "cancelled"
     return "scheduled" if event_date >= date.today().isoformat() else "unknown"
 
