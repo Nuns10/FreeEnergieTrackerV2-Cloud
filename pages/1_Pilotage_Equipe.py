@@ -1,554 +1,351 @@
 from __future__ import annotations
 
+import html
 import re
+import sqlite3
 import unicodedata
+from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-from database import read_table
 
 st.set_page_config(
-    page_title="Cockpit Direction — Free Énergie",
+    page_title="Pulse Direction — Free Énergie",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
+ACCENT = "#ff6b2c"
+NAVY = "#10233f"
 EXCLUDED = {"ANTHONY BOUVIER", "MEHDI DIFALLAH"}
+PROJECT = Path(__file__).resolve().parents[1]
 
-# -----------------------------
-# DESIGN
-# -----------------------------
-st.markdown("""
+st.markdown(
+    """
 <style>
-.block-container{
-    padding-top:1.4rem;
-    padding-bottom:2rem;
-    max-width:1500px;
-}
-[data-testid="stSidebar"]{
-    min-width:280px;
-}
-h1{
-    font-size:2.1rem !important;
-    margin-bottom:.15rem !important;
-}
-h2{
-    font-size:1.35rem !important;
-    margin-top:.5rem !important;
-}
-h3{
-    font-size:1.05rem !important;
-}
-div[data-testid="stMetric"]{
-    border:1px solid #e6e8ec;
-    border-radius:14px;
-    padding:14px 16px;
-    background:#ffffff;
-    box-shadow:0 1px 4px rgba(0,0,0,.04);
-}
-div[data-testid="stMetric"] label{
-    font-size:.82rem !important;
-}
-div[data-testid="stMetric"] [data-testid="stMetricValue"]{
-    font-size:1.65rem !important;
-}
-.manager-card{
-    border:1px solid #e5e7eb;
-    border-radius:16px;
-    padding:16px 18px;
-    margin-bottom:10px;
-    background:#fff;
-    box-shadow:0 2px 8px rgba(0,0,0,.035);
-}
-.manager-red{
-    border-left:6px solid #ef4444;
-}
-.manager-orange{
-    border-left:6px solid #f59e0b;
-}
-.manager-green{
-    border-left:6px solid #22c55e;
-}
-.manager-name{
-    font-size:1.05rem;
-    font-weight:700;
-}
-.manager-sub{
-    color:#6b7280;
-    font-size:.9rem;
-    margin-top:2px;
-}
-.pill{
-    display:inline-block;
-    border-radius:999px;
-    padding:3px 9px;
-    font-size:.78rem;
-    margin-right:5px;
-    background:#f3f4f6;
-}
-.kpi-caption{
-    color:#6b7280;
-    font-size:.82rem;
-}
-.small-muted{
-    color:#6b7280;
-    font-size:.82rem;
-}
-hr{
-    margin:.7rem 0 1rem 0 !important;
-}
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+:root { --ink:#10233f; --muted:#708096; --orange:#ff6b2c; --cream:#f7f8fa; }
+html, body, [class*="css"] { font-family:'DM Sans',sans-serif; }
+.stApp { background:linear-gradient(145deg,#f7f8fa 0%,#fff 48%,#fff7f1 100%); }
+.block-container { max-width:1540px; padding:1.15rem 2rem 4rem; }
+h1,h2,h3 { font-family:'Manrope',sans-serif!important; color:var(--ink)!important; }
+[data-testid="stHeader"] { background:transparent; }
+[data-testid="stSidebar"] { background:#fff; border-right:1px solid #e7ebf0; }
+.hero { position:relative; overflow:hidden; background:linear-gradient(120deg,#10233f,#183a65 68%,#315e8f); border-radius:28px; padding:30px 34px; color:white; box-shadow:0 22px 55px rgba(16,35,63,.18); margin-bottom:18px; }
+.hero:after { content:""; position:absolute; width:360px; height:360px; right:-130px; top:-210px; border-radius:50%; background:radial-gradient(circle,rgba(255,107,44,.65),rgba(255,107,44,0)); }
+.hero-kicker { text-transform:uppercase; letter-spacing:.16em; color:#ffb38f; font-weight:700; font-size:.74rem; }
+.hero-title { font-family:'Manrope'; font-size:2.25rem; font-weight:800; margin:.35rem 0 .25rem; }
+.hero-sub { color:#cbd8e7; font-size:.98rem; }
+.sync { display:inline-flex; gap:7px; align-items:center; margin-top:15px; padding:7px 12px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); border-radius:999px; font-size:.79rem; }
+.sync-dot { width:8px; height:8px; border-radius:50%; background:#55db9a; box-shadow:0 0 0 5px rgba(85,219,154,.12); }
+[data-testid="stMetric"] { background:rgba(255,255,255,.92); border:1px solid #e6eaf0; border-radius:20px; padding:17px 18px; box-shadow:0 10px 30px rgba(16,35,63,.06); }
+[data-testid="stMetricLabel"] { color:#718096; font-weight:600; }
+[data-testid="stMetricValue"] { font-family:'Manrope'; color:#10233f; font-size:1.72rem; }
+.section-title { display:flex; align-items:center; gap:10px; margin:26px 0 12px; color:#10233f; font-family:'Manrope'; font-weight:800; font-size:1.15rem; }
+.section-title span { width:9px; height:9px; border-radius:50%; background:#ff6b2c; box-shadow:0 0 0 6px rgba(255,107,44,.10); }
+.person-head { background:#fff; border:1px solid #e5eaf0; border-radius:24px; padding:22px 25px; box-shadow:0 12px 35px rgba(16,35,63,.07); margin:10px 0 15px; }
+.avatar { width:52px; height:52px; display:flex; align-items:center; justify-content:center; border-radius:16px; color:white; font-family:'Manrope'; font-size:1.1rem; font-weight:800; background:linear-gradient(135deg,#ff6b2c,#ff9b68); float:left; margin-right:14px; }
+.person-name { font-family:'Manrope'; color:#10233f; font-size:1.35rem; font-weight:800; padding-top:2px; }
+.person-state { color:#708096; font-size:.88rem; }
+.insight { min-height:122px; background:#fff; border:1px solid #e6eaf0; border-radius:20px; padding:18px; box-shadow:0 8px 28px rgba(16,35,63,.05); }
+.insight-label { color:#77869a; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+.insight-value { color:#10233f; font-family:'Manrope'; font-size:1.12rem; font-weight:800; margin:11px 0 5px; }
+.insight-note { color:#8491a3; font-size:.79rem; }
+.warning-card { background:linear-gradient(135deg,#fff8f3,#fff); border:1px solid #ffd9c6; border-radius:20px; padding:18px; }
+.stButton>button { border-radius:15px; border:1px solid #dfe5ec; background:#fff; color:#183a65; font-weight:700; min-height:48px; transition:.2s ease; }
+.stButton>button:hover { border-color:#ff6b2c; color:#ff6b2c; transform:translateY(-1px); box-shadow:0 8px 18px rgba(255,107,44,.12); }
+div[data-testid="stPlotlyChart"] { background:#fff; border:1px solid #e6eaf0; border-radius:22px; padding:8px; box-shadow:0 10px 30px rgba(16,35,63,.05); }
+[data-testid="stDataFrame"] { border:1px solid #e5eaf0; border-radius:18px; overflow:hidden; }
+.quiet { color:#7b8798; font-size:.82rem; }
+@media(max-width:800px){ .block-container{padding:1rem}.hero{padding:24px}.hero-title{font-size:1.7rem} }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
-def clean(v):
-    return re.sub(r"\s+", " ", "" if v is None else str(v)).strip()
+def clean(value) -> str:
+    return re.sub(r"\s+", " ", "" if value is None else str(value)).strip()
 
 
-def norm(v):
-    value = unicodedata.normalize("NFD", clean(v))
-    value = "".join(c for c in value if unicodedata.category(c) != "Mn")
-    return re.sub(r"[_\s]+", " ", value).strip().upper()
+def norm(value) -> str:
+    text = unicodedata.normalize("NFD", clean(value))
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    return re.sub(r"[_\s]+", " ", text).strip().upper()
 
 
-def col(df, names):
-    mapping = {str(c).lower(): c for c in df.columns}
-    for n in names:
-        if n.lower() in mapping:
-            return mapping[n.lower()]
-    return None
+def safe_table(name: str) -> pd.DataFrame:
+    try:
+        from database_cloud import read_dataframe
+
+        return read_dataframe(f'SELECT * FROM "{name}"')
+    except Exception:
+        for path in (PROJECT / "data" / "leads.sqlite", PROJECT / "leads.sqlite"):
+            if path.exists():
+                with sqlite3.connect(path) as connection:
+                    exists = connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+                    ).fetchone()
+                    if exists:
+                        return pd.read_sql_query(f'SELECT * FROM "{name}"', connection)
+        return pd.DataFrame()
 
 
-def bucket_status(v):
-    n = norm(v)
-    if "PROSPECT A ATTRIBUER" in n:
-        return "PROSPECT"
-    if "A RELANCER" in n:
-        return "RELANCE"
-    return "AUTRE"
-
-
-def fake_person(v):
-    v = clean(v)
-    n = norm(v)
+@st.cache_data(ttl=300, show_spinner=False)
+def load_data():
     return (
-        not v
-        or n.startswith("NRP")
-        or bool(re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", v))
-        or bool(re.search(r"\d{1,2}:\d{2}", v))
-        or len(v) > 80
+        safe_table("leads"),
+        safe_table("call_events"),
+        safe_table("calendar_events"),
+        safe_table("calendar_daily_activity"),
     )
 
 
-def derive_leads(raw):
-    if raw.empty:
-        return raw
-    d = raw.copy()
-
-    cp = col(d, ["intervenant","commercial","collaborateur","user"])
-    ci = col(d, ["crm_id","lead_id","id"])
-    cs = col(d, ["statut","status"])
-    cn = col(d, ["nombre_nrp","nrp","nb_nrp"])
-    cc = col(d, ["date_creation","created_at","cree_le"])
-    cl = col(d, ["dernier_appel","last_call","last_attempt"])
-    cnom = col(d, ["nom","name"])
-    cpre = col(d, ["prenom","first_name"])
-    csy = col(d, ["synced_at","updated_at"])
-
-    d["_commercial"] = d[cp].fillna("").astype(str).map(clean) if cp else ""
-    d["_commercial_norm"] = d["_commercial"].map(norm)
-    d["_crm_id"] = d[ci].astype(str) if ci else d.index.astype(str)
-    d["_status"] = d[cs].fillna("").astype(str).map(bucket_status) if cs else "AUTRE"
-    d["_nrp"] = pd.to_numeric(d[cn], errors="coerce").fillna(0) if cn else 0
-    d["_created"] = pd.to_datetime(d[cc], errors="coerce", dayfirst=True) if cc else pd.NaT
-    d["_lead_last_call"] = pd.to_datetime(d[cl], errors="coerce", dayfirst=True) if cl else pd.NaT
-    d["_synced"] = pd.to_datetime(d[csy], errors="coerce", dayfirst=True) if csy else pd.NaT
-
-    if cnom and cpre:
-        d["_prospect"] = (
-            d[cnom].fillna("").astype(str).str.strip()
-            + " "
-            + d[cpre].fillna("").astype(str).str.strip()
-        ).str.strip()
-    elif cnom:
-        d["_prospect"] = d[cnom].fillna("").astype(str)
-    else:
-        d["_prospect"] = d["_crm_id"]
-
-    return d[
-        ~d["_commercial"].map(fake_person)
-        & ~d["_commercial_norm"].isin(EXCLUDED)
-    ].copy()
+def column(df: pd.DataFrame, *names: str):
+    mapping = {str(c).lower(): c for c in df.columns}
+    return next((mapping[n.lower()] for n in names if n.lower() in mapping), None)
 
 
-def derive_calls(raw, leads):
-    if raw.empty:
-        return raw
-    d = raw.copy()
-
-    cp = col(d, ["commercial","intervenant","collaborateur","user"])
-    ci = col(d, ["crm_id","lead_id","prospect_id"])
-    cd = col(d, ["event_datetime","datetime","date_heure","appel_at"])
-
-    d["_crm_id"] = d[ci].astype(str) if ci else d.index.astype(str)
-    d["_datetime"] = pd.to_datetime(d[cd], errors="coerce", dayfirst=True) if cd else pd.NaT
-
-    owner_map = (
-        leads.drop_duplicates("_crm_id", keep="last")
-        .set_index("_crm_id")["_commercial"].to_dict()
-        if not leads.empty else {}
-    )
-
-    raw_people = d[cp].fillna("").astype(str).map(clean) if cp else pd.Series("", index=d.index)
-    persons = []
-
-    for idx, person in raw_people.items():
-        if fake_person(person) or norm(person) in EXCLUDED:
-            person = owner_map.get(str(d.at[idx, "_crm_id"]), "")
-        persons.append(person)
-
-    d["_commercial"] = persons
-    d["_commercial_norm"] = d["_commercial"].map(norm)
-
-    d = d[
-        d["_datetime"].notna()
-        & d["_commercial"].str.strip().ne("")
-        & ~d["_commercial_norm"].isin(EXCLUDED)
-    ].copy()
-
-    if d.empty:
-        return d
-
-    mins = d["_datetime"].dt.hour*60 + d["_datetime"].dt.minute
-    d["_strategic"] = ((mins >= 720) & (mins < 840)) | (mins >= 1110)
-
-    return d
+def person_initials(person: str) -> str:
+    words = [w for w in clean(person).split() if w]
+    return "".join(w[0] for w in words[:2]).upper() or "FE"
 
 
-def derive_calendar(raw):
-    if raw.empty:
-        return raw
-    d = raw.copy()
-
-    cp = col(d, ["commercial","intervenant","collaborateur"])
-    ct = col(d, ["title","details","name"])
-    cd = col(d, ["event_date","date"])
-    csy = col(d, ["synced_at","updated_at"])
-
-    d["_commercial"] = d[cp].fillna("").astype(str).map(clean) if cp else ""
-    d["_commercial_norm"] = d["_commercial"].map(norm)
-    d["_title"] = d[ct].fillna("").astype(str) if ct else ""
-    d["_date"] = pd.to_datetime(d[cd], errors="coerce", dayfirst=True) if cd else pd.NaT
-    d["_synced"] = pd.to_datetime(d[csy], errors="coerce", dayfirst=True) if csy else pd.NaT
-
-    return d[
-        ~d["_commercial_norm"].isin(EXCLUDED)
-        & d["_title"].str.contains(
-            r"(?<![A-Za-z0-9])R\s*[12](?![A-Za-z0-9])",
-            case=False, regex=True, na=False
-        )
-    ].copy()
-
-
-try:
-    raw_leads = read_table("leads")
-    raw_calls = read_table("call_events")
-    raw_calendar = read_table("calendar_events")
-except Exception as exc:
-    st.error("Connexion à Supabase impossible. Vérifiez DATABASE_URL dans les Secrets Streamlit.")
-    st.exception(exc)
+raw_leads, raw_calls, raw_events, raw_daily = load_data()
+if raw_leads.empty:
+    st.error("Les données CRM ne sont pas encore disponibles.")
     st.stop()
 
-leads = derive_leads(raw_leads)
-calls = derive_calls(raw_calls, leads)
-calendar = derive_calendar(raw_calendar)
+leads = raw_leads.copy()
+owner_col = column(leads, "intervenant", "commercial", "collaborateur")
+id_col = column(leads, "crm_id", "lead_id", "id")
+status_col = column(leads, "statut", "status")
+created_col = column(leads, "date_creation", "created_at")
+last_col = column(leads, "dernier_appel", "last_call")
+nrp_col = column(leads, "nombre_nrp", "nrp")
+name_col = column(leads, "nom", "name")
+first_col = column(leads, "prenom", "first_name")
+sync_col = column(leads, "synced_at", "updated_at")
 
-# Dernier appel réel par CRM ID
+leads["_person"] = leads[owner_col].fillna("").astype(str).map(clean) if owner_col else ""
+leads["_person_n"] = leads["_person"].map(norm)
+leads["_id"] = leads[id_col].astype(str) if id_col else leads.index.astype(str)
+leads["_status"] = leads[status_col].fillna("").astype(str).map(norm) if status_col else ""
+leads["_created"] = pd.to_datetime(leads[created_col], errors="coerce", dayfirst=True) if created_col else pd.NaT
+leads["_last"] = pd.to_datetime(leads[last_col], errors="coerce", dayfirst=True) if last_col else pd.NaT
+leads["_nrp"] = pd.to_numeric(leads[nrp_col], errors="coerce").fillna(0).astype(int) if nrp_col else 0
+leads["_prospect"] = leads[name_col].fillna("").astype(str) if name_col else leads["_id"]
+if first_col:
+    leads["_prospect"] = (leads[first_col].fillna("").astype(str) + " " + leads["_prospect"]).str.strip()
+leads = leads[(leads["_person"].ne("")) & (~leads["_person_n"].isin(EXCLUDED))].copy()
+
+calls = raw_calls.copy()
 if not calls.empty:
-    last_call = calls.groupby("_crm_id")["_datetime"].max()
-    leads = leads.join(last_call.rename("_last_call_events"), on="_crm_id")
+    call_person = column(calls, "commercial", "intervenant", "collaborateur")
+    call_id = column(calls, "crm_id", "lead_id")
+    call_date = column(calls, "event_datetime", "datetime", "date_heure")
+    owner_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_person"].to_dict()
+    calls["_id"] = calls[call_id].astype(str) if call_id else calls.index.astype(str)
+    calls["_person"] = calls[call_person].fillna("").astype(str).map(clean) if call_person else ""
+    calls.loc[calls["_person"].eq(""), "_person"] = calls.loc[calls["_person"].eq(""), "_id"].map(owner_map).fillna("")
+    calls["_person_n"] = calls["_person"].map(norm)
+    calls["_dt"] = pd.to_datetime(calls[call_date], errors="coerce", dayfirst=True) if call_date else pd.NaT
+    calls = calls[calls["_dt"].notna() & calls["_person"].ne("") & ~calls["_person_n"].isin(EXCLUDED)].copy()
 else:
-    leads["_last_call_events"] = pd.NaT
+    calls = pd.DataFrame(columns=["_id", "_person", "_person_n", "_dt"])
 
-leads["_last_call"] = leads["_last_call_events"].combine_first(leads["_lead_last_call"])
+events = raw_events.copy()
+if not events.empty:
+    event_person = column(events, "commercial", "intervenant")
+    event_date = column(events, "event_date", "date")
+    event_title = column(events, "title", "name")
+    events["_person"] = events[event_person].fillna("").astype(str).map(clean) if event_person else ""
+    events["_person_n"] = events["_person"].map(norm)
+    events["_date"] = pd.to_datetime(events[event_date], errors="coerce", dayfirst=True).dt.normalize() if event_date else pd.NaT
+    events["_title"] = events[event_title].fillna("").astype(str) if event_title else ""
+    events = events[events["_date"].notna() & events["_title"].str.contains(r"(?<![A-Za-z0-9])R\s*[12](?![A-Za-z0-9])", case=False, regex=True, na=False)].copy()
+else:
+    events = pd.DataFrame(columns=["_person", "_person_n", "_date", "_title"])
 
 now = pd.Timestamp.now()
-
+period_options = {"7 jours": 7, "14 jours": 14, "30 jours": 30, "8 semaines": 56}
 with st.sidebar:
-    st.header("Réglages")
-    overdue_days = st.slider("Relance en retard après", 1, 10, 3, 1, format="%d jours")
-    old_prospect_days = st.slider("Prospect ancien après", 1, 7, 2, 1, format="%d jours")
-    st.divider()
-    st.caption("Exclus de l'analyse : Anthony BOUVIER, Mehdi DIFALLAH")
+    st.markdown("### Vue de direction")
+    period_label = st.radio("Période analysée", list(period_options), index=2)
+    st.caption("Les jours ratés excluent les week-ends et la journée en cours.")
+    if st.button("Actualiser les données", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
-prospects = leads[leads["_status"]=="PROSPECT"].copy()
-relances = leads[leads["_status"]=="RELANCE"].copy()
+days = period_options[period_label]
+start = (now - pd.Timedelta(days=days)).normalize()
+period_calls = calls[calls["_dt"] >= start].copy()
+period_events = events[events["_date"] >= start].copy()
 
-if not prospects.empty:
-    prospects["_age"] = (now-prospects["_created"]).dt.total_seconds()/86400
-    prospects["_old"] = prospects["_created"].notna() & (prospects["_age"] >= old_prospect_days)
-else:
-    prospects["_old"] = False
+people = sorted(leads["_person"].dropna().unique(), key=norm)
+if not people:
+    st.warning("Aucun commercial exploitable.")
+    st.stop()
 
-if not relances.empty:
-    relances["_history"] = relances["_last_call"].notna()
-    relances["_days"] = (now-relances["_last_call"]).dt.total_seconds()/86400
-    relances["_overdue"] = relances["_history"] & (relances["_days"] >= overdue_days)
-    relances["_missing"] = ~relances["_history"]
-else:
-    relances["_history"] = False
-    relances["_overdue"] = False
-    relances["_missing"] = False
-
-last7 = now - pd.Timedelta(days=7)
-last30 = now - pd.Timedelta(days=30)
-
+business_days = pd.bdate_range(start=start, end=now.normalize() - pd.Timedelta(days=1))
 rows = []
-for person in sorted(leads["_commercial"].dropna().unique()):
-    pp = prospects[prospects["_commercial"]==person]
-    rr = relances[relances["_commercial"]==person]
-    cp = calls[calls["_commercial_norm"]==norm(person)] if not calls.empty else pd.DataFrame()
-    kp = calendar[calendar["_commercial_norm"]==norm(person)] if not calendar.empty else pd.DataFrame()
-
-    cp7 = cp[cp["_datetime"]>=last7] if not cp.empty else pd.DataFrame()
-
-    overdue = int(rr["_overdue"].sum()) if not rr.empty else 0
-    missing = int(rr["_missing"].sum()) if not rr.empty else 0
-    oldp = int(pp["_old"].sum()) if not pp.empty else 0
-    calls7 = len(cp7)
-    strategic = int(cp7["_strategic"].sum()) if not cp7.empty else 0
-    strategic_pct = round(strategic/max(calls7,1)*100,1)
-    rdv30 = len(kp[kp["_date"]>=last30]) if not kp.empty else 0
-
-    # Score direction plus lisible, avec pénalités plafonnées
-    score = 100.0
-    score -= min(30, overdue * 2.5)
-    score -= min(12, missing * 2)
-    score -= min(18, oldp / max(len(pp),1) * 18 if len(pp) else 0)
-
-    if calls7 >= 10:
-        if strategic_pct < 10:
-            score -= 15
-        elif strategic_pct < 20:
-            score -= 8
-
-    if rdv30 == 0 and calls7 >= 20:
-        score -= 8
-
-    score = max(0, round(score))
-
-    if score < 55:
-        level = "red"
-        state = "🔴 Action"
-    elif score < 75:
-        level = "orange"
-        state = "🟠 Vigilance"
-    else:
-        level = "green"
-        state = "🟢 OK"
-
-    actions = []
-    if overdue:
-        actions.append(f"{overdue} relance(s) en retard")
-    if missing:
-        actions.append(f"{missing} historique(s) manquant(s)")
-    if oldp:
-        actions.append(f"{oldp} prospect(s) ancien(s)")
-    if calls7 >= 10 and strategic_pct < 20:
-        actions.append("créneaux de phoning à renforcer")
-    if not actions:
-        actions = ["suivi maîtrisé"]
-
+missed_by_person: dict[str, list[pd.Timestamp]] = {}
+for person in people:
+    pn = norm(person)
+    lp = leads[leads["_person_n"] == pn]
+    cp = period_calls[period_calls["_person_n"] == pn]
+    ep = period_events[period_events["_person_n"] == pn]
+    call_days = set(cp["_dt"].dt.normalize())
+    rdv_days = set(ep["_date"])
+    missed = [d for d in business_days if d not in call_days and d not in rdv_days]
+    missed_by_person[person] = missed
+    strategic = cp[((cp["_dt"].dt.hour >= 12) & (cp["_dt"].dt.hour < 14)) | ((cp["_dt"].dt.hour * 60 + cp["_dt"].dt.minute) >= 1110)]
+    relances = lp[lp["_status"].str.contains("A RELANCER", na=False)]
     rows.append({
-        "Commercial":person,
-        "Niveau":level,
-        "État":state,
-        "Score":score,
-        "À attribuer":len(pp),
-        "Prospects anciens":oldp,
-        "À relancer":len(rr),
-        "Retards":overdue,
-        "Historique manquant":missing,
-        "Appels 7j":calls7,
-        "Phoning stratégique":strategic_pct,
-        "RDV 30j":rdv30,
-        "RDV 8 sem.":len(kp),
-        "Action":" · ".join(actions[:2]),
+        "Commercial": person,
+        "Appels": len(cp),
+        "Leads actifs": len(lp),
+        "À relancer": len(relances),
+        "NRP": int(lp["_nrp"].sum()),
+        "R1/R2": len(ep),
+        "Jours ratés": len(missed),
+        "Appels stratégiques": len(strategic),
+        "Dernier NRP": cp["_dt"].max() if not cp.empty else pd.NaT,
+        "Score": max(0, min(100, round(100 - len(missed) * 5 - len(relances) * .7 + min(12, len(strategic))))),
     })
 
-team = pd.DataFrame(rows)
-if not team.empty:
-    team = team.sort_values(["Score","Retards"], ascending=[True,False]).reset_index(drop=True)
+team = pd.DataFrame(rows).sort_values(["Jours ratés", "Appels"], ascending=[False, True]).reset_index(drop=True)
+if "selected_person" not in st.session_state or st.session_state.selected_person not in people:
+    st.session_state.selected_person = team.iloc[0]["Commercial"]
 
-# -----------------------------
-# HEADER COMPACT
-# -----------------------------
-title_col, sync_col = st.columns([2.5,1])
-with title_col:
-    st.title("⚡ Cockpit Direction")
-    st.caption("Les décisions du jour, sans bruit.")
-with sync_col:
-    crm_ts = leads["_synced"].dropna().max() if not leads.empty else None
-    cal_ts = calendar["_synced"].dropna().max() if not calendar.empty else None
-    st.markdown(
-        f"<div class='small-muted'>CRM : <b>{pd.Timestamp(crm_ts).strftime('%d/%m %H:%M') if crm_ts is not None and not pd.isna(crm_ts) else '—'}</b>"
-        f"<br>Calendrier : <b>{pd.Timestamp(cal_ts).strftime('%d/%m %H:%M') if cal_ts is not None and not pd.isna(cal_ts) else '—'}</b></div>",
-        unsafe_allow_html=True
-    )
+latest_sync = pd.to_datetime(leads[sync_col], errors="coerce").max() if sync_col else pd.NaT
+sync_text = latest_sync.strftime("%d/%m/%Y à %H:%M") if pd.notna(latest_sync) else "synchronisation cloud active"
+st.markdown(
+    f"""
+    <div class="hero">
+      <div class="hero-kicker">Free Énergie · Intelligence commerciale</div>
+      <div class="hero-title">Pulse Direction</div>
+      <div class="hero-sub">L'activité réelle de l'équipe. Les signaux faibles deviennent des décisions.</div>
+      <div class="sync"><span class="sync-dot"></span>Données actualisées : {sync_text}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# KPI
-k1,k2,k3,k4,k5 = st.columns(5)
-k1.metric("À attribuer", len(prospects))
-k2.metric("À relancer", len(relances))
-k3.metric("Retards réels", int(relances["_overdue"].sum()) if not relances.empty else 0)
-k4.metric("Historiques manquants", int(relances["_missing"].sum()) if not relances.empty else 0)
-k5.metric("RDV R1/R2", len(calendar))
+total_missed = int(team["Jours ratés"].sum())
+total_strategic = int(team["Appels stratégiques"].sum())
+latest_team_call = calls["_dt"].max() if not calls.empty else pd.NaT
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Appels · période", f"{len(period_calls):,}".replace(",", " "))
+k2.metric("R1 / R2", len(period_events))
+k3.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
+k4.metric("Appels midi / soir", total_strategic)
+k5.metric("Dernier appel équipe", latest_team_call.strftime("%d/%m %H:%M") if pd.notna(latest_team_call) else "—")
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="section-title"><span></span>Choisir un commercial</div>', unsafe_allow_html=True)
+for offset in range(0, len(team), 5):
+    cols = st.columns(5)
+    for col_ui, (_, item) in zip(cols, team.iloc[offset:offset + 5].iterrows()):
+        with col_ui:
+            label = f"{item['Commercial']}\n\n{int(item['Appels'])} appels · {int(item['Jours ratés'])} jour(s) raté(s)"
+            if st.button(label, key=f"person_{norm(item['Commercial'])}", use_container_width=True):
+                st.session_state.selected_person = item["Commercial"]
+                st.rerun()
 
-# -----------------------------
-# 1. AGENDA DU MANAGER
-# -----------------------------
-st.subheader("🚦 À traiter aujourd'hui")
+person = st.session_state.selected_person
+pn = norm(person)
+row = team[team["Commercial"] == person].iloc[0]
+pc = calls[calls["_person_n"] == pn].sort_values("_dt", ascending=False).copy()
+p_period_calls = pc[pc["_dt"] >= start]
+pl = leads[leads["_person_n"] == pn].copy()
+pe = events[(events["_person_n"] == pn) & (events["_date"] >= start)].copy()
+midday = pc[(pc["_dt"].dt.hour >= 12) & (pc["_dt"].dt.hour < 14)]
+evening = pc[(pc["_dt"].dt.hour * 60 + pc["_dt"].dt.minute) >= 1110]
+missed = missed_by_person.get(person, [])
 
-attention = team[team["Niveau"]!="green"].head(5) if not team.empty else pd.DataFrame()
+status_word = "À surveiller" if row["Jours ratés"] else "Rythme maîtrisé"
+st.markdown(
+    f"""
+    <div class="person-head">
+      <div class="avatar">{person_initials(person)}</div>
+      <div class="person-name">{html.escape(person)}</div>
+      <div class="person-state">{status_word} · score d'activité {int(row['Score'])}/100 · période {period_label}</div>
+      <div style="clear:both"></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-if attention.empty:
-    st.success("Tout est sous contrôle aujourd'hui.")
-else:
-    for _,r in attention.iterrows():
-        css = "manager-red" if r["Niveau"]=="red" else "manager-orange"
-        st.markdown(
-            f"""
-            <div class="manager-card {css}">
-              <div class="manager-name">{r['Commercial']} <span class="pill">{r['État']}</span></div>
-              <div class="manager-sub">{r['Action']}</div>
-              <div style="margin-top:10px;">
-                <span class="pill">Score {int(r['Score'])}/100</span>
-                <span class="pill">Retards {int(r['Retards'])}</span>
-                <span class="pill">À attribuer {int(r['À attribuer'])}</span>
-                <span class="pill">RDV 30j {int(r['RDV 30j'])}</span>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+last_nrp = pc["_dt"].max() if not pc.empty else pd.NaT
+last_midday = midday["_dt"].max() if not midday.empty else pd.NaT
+last_evening = evening["_dt"].max() if not evening.empty else pd.NaT
+i1, i2, i3, i4 = st.columns(4)
+cards = [
+    (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{int(row['Appels'])} appel(s) sur {period_label}"),
+    (i2, "Jour sans R1/R2 et sans appel", f"{len(missed)} jour(s)", missed[-1].strftime("Dernier : %d/%m/%Y") if missed else "Aucun jour raté"),
+    (i3, "Dernier appel entre 12h et 14h", last_midday.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_midday) else "Jamais", f"{len(midday[midday['_dt'] >= start])} sur la période"),
+    (i4, "Dernier appel après 18h30", last_evening.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_evening) else "Jamais", f"{len(evening[evening['_dt'] >= start])} sur la période"),
+]
+for target, label, value, note in cards:
+    with target:
+        st.markdown(f'<div class="insight"><div class="insight-label">{label}</div><div class="insight-value">{value}</div><div class="insight-note">{note}</div></div>', unsafe_allow_html=True)
 
-# -----------------------------
-# 2. ÉQUIPE EN CARTES
-# -----------------------------
-st.subheader("👥 Équipe")
-
-cols = st.columns(4)
-for i,(_,r) in enumerate(team.iterrows()):
-    css = {"red":"manager-red","orange":"manager-orange","green":"manager-green"}[r["Niveau"]]
-    with cols[i%4]:
-        st.markdown(
-            f"""
-            <div class="manager-card {css}">
-              <div class="manager-name">{r['Commercial']}</div>
-              <div class="manager-sub">{r['État']} · Score {int(r['Score'])}/100</div>
-              <div style="margin-top:9px">
-                <span class="pill">Retards {int(r['Retards'])}</span>
-                <span class="pill">RDV {int(r['RDV 30j'])}</span>
-              </div>
-              <div style="margin-top:8px" class="manager-sub">
-                {int(r['Appels 7j'])} appels / 7j · {r['Phoning stratégique']:.0f}% horaires stratégiques
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-# -----------------------------
-# 3. ANALYSE INDIVIDUELLE
-# -----------------------------
-st.subheader("🔎 Focus commercial")
-
-left, right = st.columns([1,2.2])
-
+st.markdown('<div class="section-title"><span></span>Rythme et discipline commerciale</div>', unsafe_allow_html=True)
+left, right = st.columns([1.55, 1])
 with left:
-    person = st.selectbox(
-        "Choisir",
-        team["Commercial"].tolist(),
-        label_visibility="collapsed"
-    )
-    r = team[team["Commercial"]==person].iloc[0]
-
-    st.markdown(f"### {r['Commercial']}")
-    st.markdown(f"**{r['État']} — {int(r['Score'])}/100**")
-    st.write(r["Action"])
-
+    if p_period_calls.empty:
+        st.info("Aucun appel enregistré sur cette période.")
+    else:
+        daily = p_period_calls.assign(Jour=p_period_calls["_dt"].dt.normalize()).groupby("Jour").size().reset_index(name="Appels")
+        fig = px.bar(daily, x="Jour", y="Appels", color_discrete_sequence=[ACCENT])
+        fig.update_traces(marker_line_width=0, hovertemplate="%{x|%d/%m}<br><b>%{y} appels</b><extra></extra>")
+        fig.update_layout(title="Appels par jour", height=350, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_family="DM Sans", xaxis_title=None, yaxis_title=None, showlegend=False)
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(gridcolor="#edf0f4")
+        st.plotly_chart(fig, use_container_width=True)
 with right:
-    a,b,c,d = st.columns(4)
-    a.metric("À attribuer", int(r["À attribuer"]))
-    b.metric("À relancer", int(r["À relancer"]))
-    c.metric("Retards", int(r["Retards"]))
-    d.metric("RDV 30j", int(r["RDV 30j"]))
+    hours = p_period_calls.assign(Heure=p_period_calls["_dt"].dt.hour + p_period_calls["_dt"].dt.minute / 60)
+    fig = go.Figure()
+    fig.add_vrect(x0=12, x1=14, fillcolor="#ff6b2c", opacity=.10, line_width=0)
+    fig.add_vrect(x0=18.5, x1=24, fillcolor="#183a65", opacity=.08, line_width=0)
+    fig.add_trace(go.Histogram(x=hours["Heure"], xbins=dict(start=8, end=24, size=1), marker_color=NAVY, hovertemplate="%{x:.0f}h : %{y} appels<extra></extra>"))
+    fig.update_layout(title="Répartition horaire", height=350, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_family="DM Sans", xaxis_title=None, yaxis_title=None, bargap=.18, showlegend=False)
+    fig.update_xaxes(range=[8, 24], dtick=2, showgrid=False)
+    fig.update_yaxes(gridcolor="#edf0f4")
+    st.plotly_chart(fig, use_container_width=True)
 
-    e,f,g,h = st.columns(4)
-    e.metric("Appels 7j", int(r["Appels 7j"]))
-    f.metric("Phoning stratégique", f"{r['Phoning stratégique']:.0f}%")
-    g.metric("Prospects anciens", int(r["Prospects anciens"]))
-    h.metric("Hist. manquants", int(r["Historique manquant"]))
+detail_left, detail_right = st.columns([1, 1.25])
+with detail_left:
+    st.markdown('<div class="section-title"><span></span>Jours ratés à expliquer</div>', unsafe_allow_html=True)
+    if missed:
+        missed_view = pd.DataFrame({"Date": [d.strftime("%A %d/%m/%Y").capitalize() for d in reversed(missed)]})
+        st.dataframe(missed_view, use_container_width=True, hide_index=True, height=min(390, 38 * len(missed_view) + 38))
+    else:
+        st.success("Aucun jour ouvré sans R1/R2 et sans appel sur la période.")
+with detail_right:
+    st.markdown('<div class="section-title"><span></span>Dernières actions</div>', unsafe_allow_html=True)
+    if pc.empty:
+        st.info("Aucun appel disponible.")
+    else:
+        prospect_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_prospect"].to_dict()
+        last_actions = pc.head(20)[["_dt", "_id"]].copy()
+        last_actions["Prospect"] = last_actions["_id"].map(prospect_map).fillna("Lead CRM")
+        last_actions["Date"] = last_actions["_dt"].dt.strftime("%d/%m/%Y %H:%M")
+        st.dataframe(last_actions[["Date", "Prospect"]], use_container_width=True, hide_index=True, height=390)
 
-# Liste actionnable des relances
-person_rr = relances[
-    (relances["_commercial"]==person)
-    & relances["_overdue"]
-].copy()
-
-if not person_rr.empty:
-    st.markdown("#### Relances prioritaires")
-    view = person_rr[
-        ["_prospect","_nrp","_last_call","_days"]
-    ].copy()
-    view["_days"] = view["_days"].round(0).astype("Int64")
-    view = view.sort_values("_days", ascending=False)
-    view.columns = ["Prospect","NRP","Dernier appel","Jours sans appel"]
-
-    st.dataframe(
-        view.head(25),
-        use_container_width=True,
-        hide_index=True,
-        height=min(36*len(view.head(25))+40, 420),
-    )
-else:
-    st.success("Aucune relance réellement en retard pour ce commercial.")
-
-# -----------------------------
-# 4. TABLEAU COMPLET EN OPTION
-# -----------------------------
-with st.expander("Voir le tableau complet de l'équipe"):
-    st.dataframe(
-        team[
-            [
-                "État","Commercial","Score","À attribuer","Prospects anciens",
-                "À relancer","Retards","Historique manquant","Appels 7j",
-                "Phoning stratégique","RDV 30j","Action"
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=100, format="%d"
-            ),
-            "Phoning stratégique": st.column_config.ProgressColumn(
-                "Phoning stratégique", min_value=0, max_value=100, format="%.0f%%"
-            ),
-        }
-    )
-
-with st.expander("Qualité des données"):
-    st.write(f"Leads analysés : **{len(leads)}**")
-    st.write(f"Événements d'appel exploitables : **{len(calls)}**")
-    st.write(f"RDV R1/R2 analysés : **{len(calendar)}**")
-    st.write(
-        f"Relances sans historique exploitable : "
-        f"**{int(relances['_missing'].sum()) if not relances.empty else 0}**"
-    )
+st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
+compare = team[["Commercial", "Score", "Appels", "R1/R2", "Jours ratés", "Appels stratégiques", "À relancer"]].copy()
+st.dataframe(
+    compare,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
+        "Jours ratés": st.column_config.NumberColumn("Jours ratés", help="Jour ouvré sans R1/R2 et sans appel"),
+    },
+)
+st.caption("Pulse Direction · Lecture managériale des données CRM et calendriers synchronisés dans Supabase.")
