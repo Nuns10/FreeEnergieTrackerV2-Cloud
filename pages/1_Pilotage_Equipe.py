@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 st.set_page_config(
@@ -17,6 +18,25 @@ st.set_page_config(
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
+)
+
+# Rend la page agréable à lancer depuis l'écran d'accueil d'un iPhone.
+components.html(
+    """
+    <script>
+    const doc = window.parent.document;
+    const ensureMeta = (name, content) => {
+      let tag = doc.head.querySelector(`meta[name="${name}"]`);
+      if (!tag) { tag = doc.createElement('meta'); tag.name = name; doc.head.appendChild(tag); }
+      tag.content = content;
+    };
+    ensureMeta('apple-mobile-web-app-capable', 'yes');
+    ensureMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+    ensureMeta('apple-mobile-web-app-title', 'Pulse Direction');
+    ensureMeta('theme-color', '#10233f');
+    </script>
+    """,
+    height=0,
 )
 
 ACCENT = "#ff6b2c"
@@ -61,7 +81,30 @@ h1,h2,h3 { font-family:'Manrope',sans-serif!important; color:var(--ink)!importan
 div[data-testid="stPlotlyChart"] { background:#fff; border:1px solid #e6eaf0; border-radius:22px; padding:8px; box-shadow:0 10px 30px rgba(16,35,63,.05); }
 [data-testid="stDataFrame"] { border:1px solid #e5eaf0; border-radius:18px; overflow:hidden; }
 .quiet { color:#7b8798; font-size:.82rem; }
-@media(max-width:800px){ .block-container{padding:1rem}.hero{padding:24px}.hero-title{font-size:1.7rem} }
+@media(max-width:800px){
+  .block-container{padding:.65rem .75rem 2.5rem;}
+  .hero{padding:20px 18px;border-radius:20px;margin-bottom:12px;}
+  .hero:after{width:220px;height:220px;right:-100px;top:-135px;}
+  .hero-kicker{font-size:.64rem;letter-spacing:.11em;}
+  .hero-title{font-size:1.55rem;line-height:1.15;}
+  .hero-sub{font-size:.86rem;line-height:1.35;max-width:85%;}
+  .sync{font-size:.7rem;padding:6px 9px;}
+  [data-testid="stMetric"]{padding:12px 13px;border-radius:15px;min-height:96px;}
+  [data-testid="stMetricValue"]{font-size:1.38rem;}
+  [data-testid="stMetricLabel"]{font-size:.72rem;}
+  .section-title{margin:19px 0 9px;font-size:1rem;}
+  .person-head{padding:16px;border-radius:18px;}
+  .avatar{width:44px;height:44px;border-radius:13px;}
+  .person-name{font-size:1.12rem;}
+  .person-state{font-size:.76rem;}
+  .insight{min-height:auto;padding:14px;border-radius:16px;}
+  .insight-value{font-size:1rem;margin:8px 0 4px;}
+  .warning-card{padding:14px;border-radius:16px;}
+  .stButton>button{min-height:44px;border-radius:13px;}
+  div[data-testid="stPlotlyChart"]{border-radius:16px;padding:3px;overflow:hidden;}
+  [data-testid="stDataFrame"]{border-radius:14px;overflow-x:auto;}
+  [data-testid="stHorizontalBlock"]{gap:.55rem;}
+}
 </style>
 """,
     unsafe_allow_html=True,
