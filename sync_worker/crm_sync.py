@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import unicodedata
 from datetime import datetime
@@ -132,6 +133,7 @@ def apply_target_statuses(page: Page) -> None:
 
     options = panel.locator("mat-option, [role='option']")
     found_targets: set[str] = set()
+    visible_labels: list[str] = []
 
     for index in range(options.count()):
         option = options.nth(index)
@@ -142,6 +144,8 @@ def apply_target_statuses(page: Page) -> None:
 
         if not label:
             continue
+
+        visible_labels.append(label)
 
         wanted = label in TARGET_STATUSES
         selected = option_is_selected(option)
@@ -155,6 +159,12 @@ def apply_target_statuses(page: Page) -> None:
 
     missing = TARGET_STATUSES - found_targets
     if missing:
+        print("Options de statut visibles : " + " | ".join(visible_labels))
+        if os.getenv("GITHUB_ACTIONS"):
+            artifact_dir = BASE_DIR / "diagnostic_cloud"
+            artifact_dir.mkdir(exist_ok=True)
+            page.screenshot(path=str(artifact_dir / "statuts.png"), full_page=True)
+            (artifact_dir / "page.html").write_text(page.content(), encoding="utf-8")
         page.keyboard.press("Escape")
         raise RuntimeError(
             "Statuts absents du filtre CRM : "
