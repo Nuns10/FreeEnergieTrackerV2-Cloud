@@ -154,6 +154,8 @@ def load_data():
         safe_table("call_events"),
         safe_table("calendar_events"),
         safe_table("calendar_daily_activity"),
+        safe_table("lead_funnel"),
+        safe_table("lead_status_history"),
     )
 
 
@@ -190,7 +192,7 @@ def parse_calendar_dates(values: pd.Series) -> pd.Series:
     return iso.dt.normalize()
 
 
-raw_leads, raw_calls, raw_events, raw_daily = load_data()
+raw_leads, raw_calls, raw_events, raw_daily, raw_funnel, raw_status_history = load_data()
 if raw_leads.empty:
     st.error("Les données CRM ne sont pas encore disponibles.")
     st.stop()
@@ -582,6 +584,81 @@ with tright:
     fig_trend_rdv.update_layout(title="Rendez-vous effectués et à débriefer", height=310, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title=None, font_family="DM Sans", legend_title=None)
     fig_trend_rdv.update_yaxes(gridcolor="#edf0f4")
     st.plotly_chart(fig_trend_rdv, use_container_width=True)
+
+st.markdown('<div class="section-title"><span></span>Transformation des leads</div>', unsafe_allow_html=True)
+if raw_funnel.empty:
+    st.info("Le nouveau relevé complet du tunnel sera disponible après la prochaine synchronisation CRM.")
+else:
+    funnel = raw_funnel.copy()
+    funnel["_created"] = pd.to_datetime(funnel.get("date_creation"), dayfirst=True, errors="coerce")
+    funnel["_status_at"] = pd.to_datetime(funnel.get("date_statut"), dayfirst=True, errors="coerce")
+    funnel["_status"] = funnel.get("statut", "").map(norm)
+    funnel["_source"] = funnel.get("source", "Source inconnue").map(clean).replace("", "Source inconnue")
+    funnel["_owner"] = funnel.get("intervenant", "Non attribué").map(clean).replace("", "Non attribué")
+    funnel["Mois d'attribution"] = funnel["_created"].dt.to_period("M").astype(str)
+
+    # L'historique quotidien permet de conserver un R1/R2 même si le lead
+    # change ensuite de statut. Au premier relevé, le statut courant complète
+    # l'information ; la précision historique augmentera chaque nuit.
+    current_rdv = funnel["_status"].str.match(r"^R[12](?:\b| )", na=False)
+    ever_rdv_ids: set[str] = set()
+    if not raw_status_history.empty and "statut" in raw_status_history:
+        hist_status = raw_status_history["statut"].map(norm)
+        ever_rdv_ids = set(
+            raw_status_history.loc[
+                hist_status.str.match(r"^R[12](?:\b| )", na=False), "crm_id"
+            ].astype(str)
+        )
+    funnel["RDV positionné"] = current_rdv | funnel["crm_id"].astype(str).isin(ever_rdv_ids)
+    funnel["Délai de traitement (h)"] = (
+        (funnel["_status_at"] - funnel["_created"]).dt.total_seconds() / 3600
+    ).where(funnel["RDV positionné"])
+
+    valid = funnel[funnel["_created"].notna()].copy()
+    converted = int(valid["RDV positionné"].sum())
+    rate = converted / len(valid) * 100 if len(valid) else 0
+    delay = valid.loc[valid["RDV positionné"], "Délai de traitement (h)"].dropna()
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Leads analysés", f"{len(valid):,}".replace(",", " "))
+    k2.metric("Passés en R1/R2", converted)
+    k3.metric("Taux de prise de RDV", f"{rate:.1f}%")
+    k4.metric("Délai médian vers RDV", f"{delay.median():.0f} h" if not delay.empty else "—")
+
+    source_stats = valid.groupby("_source").agg(
+        Leads=("crm_id", "nunique"),
+        RDV=("RDV positionné", "sum"),
+        **{"Délai médian (h)": ("Délai de traitement (h)", "median")},
+    ).reset_index().rename(columns={"_source": "Source"})
+    source_stats["Transformation"] = (100 * source_stats["RDV"] / source_stats["Leads"]).round(1)
+    source_stats = source_stats.sort_values(["Leads", "Transformation"], ascending=False)
+
+    month_stats = valid.groupby("Mois d'attribution").agg(
+        Leads=("crm_id", "nunique"), RDV=("RDV positionné", "sum")
+    ).reset_index()
+    month_stats["Transformation"] = (100 * month_stats["RDV"] / month_stats["Leads"]).round(1)
+
+    fleft, fright = st.columns([1.15, 1])
+    with fleft:
+        st.markdown("**Performance par source**")
+        st.dataframe(
+            source_stats.head(25), use_container_width=True, hide_index=True,
+            column_config={"Transformation": st.column_config.ProgressColumn("Taux RDV", format="%.1f%%", min_value=0, max_value=100)},
+        )
+    with fright:
+        fig_month = px.bar(
+            month_stats.tail(12), x="Mois d'attribution", y="Transformation",
+            text="Transformation", color_discrete_sequence=[ACCENT],
+        )
+        fig_month.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig_month.update_layout(title="Taux de RDV par mois d'attribution", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title="%", font_family="DM Sans")
+        fig_month.update_yaxes(gridcolor="#edf0f4", rangemode="tozero")
+        st.plotly_chart(fig_month, use_container_width=True)
+
+    lost = valid[~valid["RDV positionné"]].groupby("_status").size().reset_index(name="Leads")
+    lost = lost.rename(columns={"_status": "Statut actuel"}).sort_values("Leads", ascending=False)
+    with st.expander("Comprendre les leads sans rendez-vous"):
+        st.dataframe(lost.head(30), use_container_width=True, hide_index=True)
+        st.caption("Cette répartition inclut notamment Pas de demande, Projet abandonné, À relancer et les autres statuts du CRM.")
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
