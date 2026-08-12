@@ -61,6 +61,8 @@ def ensure_tables() -> None:
                 start_time TEXT,
                 end_time TEXT,
                 title TEXT,
+                color_hex TEXT,
+                status_kind TEXT,
                 week_label TEXT,
                 source_url TEXT,
                 synced_at TEXT NOT NULL
@@ -70,6 +72,7 @@ def ensure_tables() -> None:
         for name, sqltype in {
             "event_key": "TEXT", "commercial": "TEXT", "event_date": "TEXT",
             "start_time": "TEXT", "end_time": "TEXT", "title": "TEXT",
+            "color_hex": "TEXT", "status_kind": "TEXT",
             "week_label": "TEXT", "source_url": "TEXT", "synced_at": "TEXT"
         }.items():
             if name not in cols:
@@ -134,21 +137,24 @@ def save_events(events: list[dict[str, Any]]) -> int:
             con.execute("""
                 INSERT INTO calendar_events(
                     event_key, commercial, event_date, start_time, end_time,
-                    title, week_label, source_url, synced_at
+                    title, color_hex, status_kind, week_label, source_url, synced_at
                 )
-                VALUES(?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(event_key) DO UPDATE SET
                     commercial=excluded.commercial,
                     event_date=excluded.event_date,
                     start_time=excluded.start_time,
                     end_time=excluded.end_time,
                     title=excluded.title,
+                    color_hex=excluded.color_hex,
+                    status_kind=excluded.status_kind,
                     week_label=excluded.week_label,
                     source_url=excluded.source_url,
                     synced_at=excluded.synced_at
             """, (
                 event["event_key"], event["commercial"], event["event_date"],
                 event.get("start_time"), event.get("end_time"), event.get("title"),
+                event.get("color_hex"), event.get("status_kind"),
                 event.get("week_label"), event.get("source_url"), now
             ))
         con.commit()
@@ -316,6 +322,33 @@ def week_label(page: Page) -> str:
     return m.group(0) if m else ""
 
 
+def css_to_hex(value: str | None) -> str | None:
+    match = re.search(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", value or "")
+    if not match:
+        return None
+    rgb = tuple(int(match.group(i)) for i in range(1, 4))
+    if max(rgb) - min(rgb) < 15 and max(rgb) > 225:
+        return None
+    return "#" + "".join(f"{part:02X}" for part in rgb)
+
+
+def classify_color(color_hex: str | None, event_date: str) -> str:
+    if not color_hex:
+        return "scheduled" if event_date >= date.today().isoformat() else "unknown"
+    red = int(color_hex[1:3], 16)
+    green = int(color_hex[3:5], 16)
+    blue = int(color_hex[5:7], 16)
+    if green > red * 1.10 and green > blue * 1.05:
+        return "completed"
+    if blue > red * 1.08 and blue >= green:
+        return "pending_debrief"
+    if red > 145 and green > 105 and blue < 115:
+        return "pending_debrief"
+    if (red > green * 1.18 and red > blue * 1.10) or (red > 100 and blue > 100 and green < min(red, blue) * .85):
+        return "cancelled"
+    return "scheduled" if event_date >= date.today().isoformat() else "unknown"
+
+
 def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
     raw = page.evaluate("""
     () => {
@@ -327,7 +360,14 @@ def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
         .filter(visible)
         .map(e => {
           const r=e.getBoundingClientRect();
-          return {text:(e.innerText||'').replace(/\\s+/g,' ').trim(),x:r.x,y:r.y};
+          let node=e, color='';
+          for(let depth=0; depth<5 && node; depth++, node=node.parentElement){
+            const s=getComputedStyle(node);
+            const candidates=[s.backgroundColor,s.borderLeftColor,s.borderColor];
+            color=candidates.find(c => c && c!=='rgba(0, 0, 0, 0)' && c!=='transparent' && c!=='rgb(255, 255, 255)') || color;
+            if(color) break;
+          }
+          return {text:(e.innerText||'').replace(/\\s+/g,' ').trim(),x:r.x,y:r.y,color};
         })
         .filter(x => x.x>390 && x.text);
       const dates=all.filter(x => /\\b\\d{1,2}\\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)\\s+\\d{4}\\b/i.test(x.text))
@@ -336,7 +376,7 @@ def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
                       .sort((a,b)=>a.y-b.y);
       return events.map(ev => {
         const prev=dates.filter(d=>d.y<=ev.y);
-        return {text:ev.text,dateText:prev.length?prev[prev.length-1].text:''};
+        return {text:ev.text,dateText:prev.length?prev[prev.length-1].text:'',color:ev.color||''};
       });
     }
     """)
@@ -359,6 +399,7 @@ def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
             continue
 
         start, end = m.group(1), m.group(2)
+        color_hex = css_to_hex(item.get("color"))
         key = "|".join([normalize(commercial), event_date, start, end, normalize(title)])
         if key in seen:
             continue
@@ -370,6 +411,8 @@ def extract_events(page: Page, commercial: str) -> list[dict[str, Any]]:
             "start_time": start,
             "end_time": end,
             "title": title,
+            "color_hex": color_hex,
+            "status_kind": classify_color(color_hex, event_date),
             "week_label": label,
             "source_url": page.url,
         })
@@ -410,7 +453,30 @@ def previous_week(page: Page) -> None:
     raise RuntimeError("Bouton semaine précédente introuvable.")
 
 
-def sync_calendar(weeks_back: int = 8, interactive: bool = False) -> None:
+def next_week(page: Page) -> None:
+    before = week_label(page)
+    selectors = [
+        "button.fc-next-button",
+        "button[title='Suivant']",
+        "button:has(mat-icon:text-is('chevron_right'))",
+        "button:has(mat-icon:text-is('navigate_next'))",
+    ]
+    for selector in selectors:
+        try:
+            item = first_visible(page.locator(selector))
+            if item:
+                item.click(force=True)
+                for _ in range(25):
+                    page.wait_for_timeout(200)
+                    if week_label(page) != before:
+                        return
+                return
+        except Exception:
+            pass
+    raise RuntimeError("Bouton semaine suivante introuvable.")
+
+
+def sync_calendar(weeks_back: int = 8, weeks_forward: int = 8, interactive: bool = False) -> None:
     ensure_tables()
     set_sync_state("running", "Synchronisation en cours")
 
@@ -453,18 +519,40 @@ def sync_calendar(weeks_back: int = 8, interactive: bool = False) -> None:
                         pass
 
                     commercial_saved = 0
-                    for wi in range(max(1, weeks_back)):
+
+                    # Semaine courante puis semaines futures.
+                    for wi in range(max(0, weeks_forward) + 1):
                         label = week_label(page)
                         events = extract_events(page, commercial)
                         count = save_events(events)  # sauvegarde AU FIL DE L'EAU
                         saved_total += count
                         commercial_saved += count
                         print(
-                            f"  Semaine {wi+1}/{weeks_back} — {label or 'période'} : "
+                            f"  Future {wi+1}/{weeks_forward + 1} — {label or 'période'} : "
                             f"{len(events)} RDV R1/R2 enregistrés"
                         )
-                        if wi < weeks_back - 1:
-                            previous_week(page)
+                        if wi < weeks_forward:
+                            next_week(page)
+
+                    # Retour à aujourd'hui, puis historique sans retraiter la semaine courante.
+                    try:
+                        today = first_visible(page.locator("button.fc-today-button, button:has-text(\"Aujourd'hui\")"))
+                        if today:
+                            today.click(force=True)
+                            page.wait_for_timeout(800)
+                    except Exception:
+                        pass
+                    for wi in range(max(0, weeks_back)):
+                        previous_week(page)
+                        label = week_label(page)
+                        past_events = extract_events(page, commercial)
+                        count = save_events(past_events)
+                        saved_total += count
+                        commercial_saved += count
+                        print(
+                            f"  Passé {wi+1}/{weeks_back} — {label or 'période'} : "
+                            f"{len(past_events)} RDV R1/R2 enregistrés"
+                        )
 
                     print(f"  Total {commercial}: {commercial_saved} RDV R1/R2")
                 except Exception as exc:
@@ -500,6 +588,7 @@ def sync_calendar(weeks_back: int = 8, interactive: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--weeks-back", "--weeks", dest="weeks_back", type=int, default=8)
+    parser.add_argument("--weeks-forward", type=int, default=8)
     parser.add_argument("--interactive", action="store_true")
     args = parser.parse_args()
-    sync_calendar(max(args.weeks_back, 1), args.interactive)
+    sync_calendar(max(args.weeks_back, 0), max(args.weeks_forward, 0), args.interactive)
