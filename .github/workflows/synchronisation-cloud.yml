@@ -31,6 +31,8 @@ jobs:
       - run: playwright install --with-deps chromium
       - name: Restaurer les données existantes
         run: python sync_worker/export_supabase_to_sqlite.py
+      - name: Photographier le tunnel commercial complet
+        run: python sync_worker/funnel_sync.py
       - name: Synchroniser les leads et appels
         run: python sync_worker/crm_sync.py
       - name: Synchroniser les calendriers récents
