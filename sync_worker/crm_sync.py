@@ -116,6 +116,20 @@ def apply_target_statuses(page: Page) -> None:
             "Le filtre Statut du tableau CRM est introuvable."
         )
 
+    # La session CRM mémorise généralement ce filtre. Dans ce cas, ne pas
+    # rouvrir puis manipuler le panneau Angular : en mode cloud, ses options
+    # peuvent être visibles à l'écran tout en étant temporairement absentes
+    # de la collection Playwright.
+    current_selected = {
+        normalize(item)
+        for item in clean(status_select.first.inner_text()).split(",")
+        if clean(item)
+    }
+    if current_selected == TARGET_STATUSES:
+        print("Filtre CRM déjà actif : PROSPECT À ATTRIBUER + À RELANCER.")
+        verify_filtered_results(page)
+        return
+
     before = paginator_text(page)
     status_select.first.click(force=True)
     page.wait_for_timeout(500)
