@@ -225,20 +225,38 @@ def apply_target_statuses(page: Page) -> None:
 
 
 def row_status(row) -> str:
-    cell = row.locator("td.mat-column-status")
-    if cell.count() == 0:
-        return ""
-    return normalize(cell.first.inner_text())
+    # Ancienne et nouvelle structure Angular du tableau CRM.
+    cells = row.locator(
+        "td.mat-column-status, td[class*='mat-column-status'], "
+        "[role='gridcell'][class*='status']"
+    )
+    for index in range(cells.count()):
+        value = normalize(cells.nth(index).inner_text())
+        if value:
+            return value
+
+    # Repli : chercher le libellé métier dans les cellules de la ligne.
+    for index in range(row.locator("td, [role='gridcell']").count()):
+        value = normalize(row.locator("td, [role='gridcell']").nth(index).inner_text())
+        for target in TARGET_STATUSES:
+            if target in value:
+                return target
+    return ""
 
 
 def verify_filtered_results(page: Page) -> None:
     rows = page.locator("tbody tr.mat-row")
     observed: set[str] = set()
 
-    for index in range(min(rows.count(), 20)):
-        status = row_status(rows.nth(index))
-        if status:
-            observed.add(status)
+    for _ in range(20):
+        observed.clear()
+        for index in range(min(rows.count(), 20)):
+            status = row_status(rows.nth(index))
+            if status:
+                observed.add(status)
+        if observed:
+            break
+        page.wait_for_timeout(250)
 
     invalid = observed - TARGET_STATUSES
     if invalid:
