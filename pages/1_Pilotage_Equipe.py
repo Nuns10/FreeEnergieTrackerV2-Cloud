@@ -280,6 +280,7 @@ pe = events[(events["_person_n"] == pn) & (events["_date"] >= start)].copy()
 midday = pc[(pc["_dt"].dt.hour >= 12) & (pc["_dt"].dt.hour < 14)]
 evening = pc[(pc["_dt"].dt.hour * 60 + pc["_dt"].dt.minute) >= 1110]
 missed = missed_by_person.get(person, [])
+prospect_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_prospect"].to_dict()
 
 status_word = "À surveiller" if row["Jours ratés"] else "Rythme maîtrisé"
 st.markdown(
@@ -295,11 +296,12 @@ st.markdown(
 )
 
 last_nrp = pc["_dt"].max() if not pc.empty else pd.NaT
+last_nrp_name = prospect_map.get(str(pc.iloc[0]["_id"]), "Lead CRM") if not pc.empty else "Aucun prospect"
 last_midday = midday["_dt"].max() if not midday.empty else pd.NaT
 last_evening = evening["_dt"].max() if not evening.empty else pd.NaT
 i1, i2, i3, i4 = st.columns(4)
 cards = [
-    (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{int(row['Appels'])} appel(s) sur {period_label}"),
+    (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{last_nrp_name} · {int(row['Appels'])} appel(s)"),
     (i2, "Jour sans R1/R2 et sans appel", f"{len(missed)} jour(s)", missed[-1].strftime("Dernier : %d/%m/%Y") if missed else "Aucun jour raté"),
     (i3, "Dernier appel entre 12h et 14h", last_midday.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_midday) else "Jamais", f"{len(midday[midday['_dt'] >= start])} sur la période"),
     (i4, "Dernier appel après 18h30", last_evening.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_evening) else "Jamais", f"{len(evening[evening['_dt'] >= start])} sur la période"),
@@ -345,7 +347,6 @@ with detail_right:
     if pc.empty:
         st.info("Aucun appel disponible.")
     else:
-        prospect_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_prospect"].to_dict()
         last_actions = pc.head(20)[["_dt", "_id"]].copy()
         last_actions["Prospect"] = last_actions["_id"].map(prospect_map).fillna("Lead CRM")
         last_actions["Date"] = last_actions["_dt"].dt.strftime("%d/%m/%Y %H:%M")
