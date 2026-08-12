@@ -16,6 +16,7 @@ from cloud_browser import launch_context
 from crm_sync import (
     LIST_URL,
     PROFILE_DIR,
+    TARGET_STATUSES,
     cell_text,
     clean,
     normalize,
@@ -82,7 +83,12 @@ def clear_status_filter(page) -> None:
     if select.count() == 0:
         raise RuntimeError("Filtre Statut introuvable dans le CRM.")
 
-    if not clean(select.first.inner_text()):
+    selected_labels = {
+        normalize(item)
+        for item in clean(select.first.inner_text()).split(",")
+        if clean(item)
+    }
+    if not selected_labels:
         print("Aucun filtre de statut actif.")
         return
 
@@ -95,16 +101,23 @@ def clear_status_filter(page) -> None:
     options.first.wait_for(state="attached", timeout=15_000)
     for index in range(options.count()):
         option = options.nth(index)
-        selected = option.get_attribute("aria-selected") == "true" or "selected" in (
-            option.get_attribute("class") or ""
-        ).lower()
-        if selected:
+        label = normalize(option.text_content())
+        # Le navigateur cloud ne restitue pas toujours aria-selected. Le
+        # libellé affiché par le champ avant ouverture est la référence fiable.
+        if label in selected_labels or label in TARGET_STATUSES:
             option.click(force=True)
             page.wait_for_timeout(100)
     page.keyboard.press("Escape")
-    page.wait_for_timeout(1800)
+    page.wait_for_timeout(3500)
     wait_for_rows(page)
-    print(f"Filtre Statut retiré. Pagination : {paginator_text(page)}")
+    pagination = paginator_text(page)
+    print(f"Filtre Statut retiré. Pagination : {pagination}")
+    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
+    total = int(match.group(1).replace(" ", "")) if match else 0
+    if total and total < 5_000:
+        raise RuntimeError(
+            f"Le filtre CRM est encore actif ({total} leads seulement)."
+        )
 
 
 def row_status_any(row) -> str | None:
