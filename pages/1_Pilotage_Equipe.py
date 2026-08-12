@@ -266,8 +266,11 @@ with st.sidebar:
 
 days = period_options[period_label]
 start = (now - pd.Timedelta(days=days)).normalize()
+previous_start = start - pd.Timedelta(days=days)
 period_calls = calls[calls["_dt"] >= start].copy()
-period_events = events[events["_date"] >= start].copy()
+previous_calls = calls[(calls["_dt"] >= previous_start) & (calls["_dt"] < start)].copy()
+period_events = events[(events["_date"] >= start) & (events["_date"] <= now.normalize())].copy()
+previous_events = events[(events["_date"] >= previous_start) & (events["_date"] < start)].copy()
 
 people = sorted(leads["_person"].dropna().unique(), key=norm)
 if not people:
@@ -281,6 +284,7 @@ for person in people:
     pn = norm(person)
     lp = leads[leads["_person_n"] == pn]
     cp = period_calls[period_calls["_person_n"] == pn]
+    previous_cp = previous_calls[previous_calls["_person_n"] == pn]
     ep = period_events[period_events["_person_n"] == pn]
     call_days = set(cp["_dt"].dt.normalize())
     rdv_days = set(ep["_date"])
@@ -297,6 +301,8 @@ for person in people:
     rows.append({
         "Commercial": person,
         "Appels": len(cp),
+        "NRP précédents": len(previous_cp),
+        "Évolution NRP": round((len(cp) - len(previous_cp)) / len(previous_cp) * 100) if len(previous_cp) else None,
         "Leads actifs": len(lp),
         "À relancer": len(relances),
         "NRP": int(lp["_nrp"].sum()),
@@ -335,15 +341,21 @@ total_strategic = int(team["Appels stratégiques"].sum())
 latest_team_call = calls["_dt"].max() if not calls.empty else pd.NaT
 future_events = events[events["_date"] >= now.normalize()]
 past_events = events[events["_date"] < now.normalize()]
-completed_total = int(events["_status"].eq("completed").sum())
-pending_total = int(events["_status"].eq("pending_debrief").sum())
-cancelled_total = int(events["_status"].eq("cancelled").sum())
-not_completed_total = int(events["_status"].eq("not_completed").sum())
+completed_total = int(period_events["_status"].eq("completed").sum())
+pending_total = int(period_events["_status"].eq("pending_debrief").sum())
+cancelled_total = int(period_events["_status"].eq("cancelled").sum())
+not_completed_total = int(period_events["_status"].eq("not_completed").sum())
 decided_total = completed_total + pending_total + cancelled_total + not_completed_total
 completion_total = round(completed_total / decided_total * 100) if decided_total else None
+previous_completed = int(previous_events["_status"].eq("completed").sum())
+previous_decided = int(previous_events["_status"].isin(["completed", "pending_debrief", "cancelled", "not_completed"]).sum())
+previous_completion = round(previous_completed / previous_decided * 100) if previous_decided else None
+completion_delta = completion_total - previous_completion if completion_total is not None and previous_completion is not None else None
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("R1/R2 à venir", len(future_events))
-k2.metric("Taux effectués", f"{completion_total}%" if completion_total is not None else "En attente")
+k2.metric("Taux effectués", f"{completion_total}%" if completion_total is not None else "En attente",
+          delta=f"{completion_delta:+.0f} pts vs période précédente" if completion_delta is not None else None,
+          help=f"{completed_total} effectués sur {decided_total} rendez-vous passés avec un statut")
 k3.metric("Non débriefés", pending_total, delta="À traiter" if pending_total else "RAS", delta_color="inverse")
 k4.metric("Annulés / non faits", cancelled_total + not_completed_total,
           help=f"{cancelled_total} annulé(s) · {not_completed_total} non effectué(s)")
@@ -355,6 +367,12 @@ if decided_total == 0 and not events.empty:
 today = now.normalize()
 today_events = events[events["_date"].eq(today)].copy()
 today_pending = int(today_events["_status"].eq("pending_debrief").sum())
+today_calls = calls[calls["_dt"].dt.normalize().eq(today)].copy()
+active_today = int(today_calls["_person_n"].nunique())
+silent_today = max(0, len(people) - active_today)
+current_nrp_total = len(period_calls)
+previous_nrp_total = len(previous_calls)
+nrp_delta = round((current_nrp_total - previous_nrp_total) / previous_nrp_total * 100) if previous_nrp_total else None
 team_pending = team.sort_values("Non débriefés", ascending=False).iloc[0]
 team_missed = team.sort_values("Jours ratés", ascending=False).iloc[0]
 team_completion = team[team["Taux effectué"].notna()].sort_values("Taux effectué", ascending=True)
@@ -363,10 +381,10 @@ lowest_completion = team_completion.iloc[0] if not team_completion.empty else No
 st.markdown('<div class="section-title"><span></span>Direction du jour</div>', unsafe_allow_html=True)
 a1, a2, a3, a4 = st.columns(4)
 direction_cards = [
-    (a1, "blue", "À débriefer aujourd’hui", str(today_pending), "Rendez-vous bleus à traiter en priorité"),
-    (a2, "blue", "Plus gros stock à débriefer", html.escape(str(team_pending["Commercial"])), f'{int(team_pending["Non débriefés"])} rendez-vous en attente'),
-    (a3, "danger", "Discipline à reprendre", html.escape(str(team_missed["Commercial"])), f'{int(team_missed["Jours ratés"])} jours sans action'),
-    (a4, "orange", "Taux effectué le plus faible", html.escape(str(lowest_completion["Commercial"])) if lowest_completion is not None else "À confirmer", f'{int(lowest_completion["Taux effectué"])}% sur la période' if lowest_completion is not None else "Données insuffisantes"),
+    (a1, "blue", "Rendez-vous aujourd’hui", str(len(today_events)), f"{today_pending} à débriefer"),
+    (a2, "orange", "Activité aujourd’hui", f"{active_today}/{len(people)}", f"{silent_today} commercial(aux) sans NRP aujourd’hui"),
+    (a3, "blue", "Évolution des NRP", f"{nrp_delta:+d}%" if nrp_delta is not None else "—", f"{current_nrp_total} contre {previous_nrp_total} période précédente"),
+    (a4, "danger", "Priorité managériale", html.escape(str(team_pending["Commercial"])), f'{int(team_pending["Non débriefés"])} rendez-vous à débriefer'),
 ]
 for target, css, title, value, note in direction_cards:
     with target:
@@ -540,6 +558,30 @@ with detail_right:
         last_actions["Date"] = last_actions["_dt"].dt.strftime("%d/%m/%Y %H:%M")
         st.dataframe(last_actions[["Date", "Prospect"]], use_container_width=True, hide_index=True, height=390)
         st.caption("Cette liste montre les événements NRP collectés dans l'historique des leads, pas toutes les actions du CRM.")
+
+st.markdown('<div class="section-title"><span></span>Tendance de l’équipe</div>', unsafe_allow_html=True)
+trend_start = now.normalize() - pd.Timedelta(weeks=8)
+weekly_calls = calls[calls["_dt"] >= trend_start].copy()
+weekly_calls["Semaine"] = weekly_calls["_dt"].dt.to_period("W-MON").dt.start_time
+weekly_calls = weekly_calls.groupby("Semaine").size().reset_index(name="NRP")
+weekly_rdv = events[(events["_date"] >= trend_start) & (events["_date"] <= now.normalize())].copy()
+weekly_rdv["Semaine"] = weekly_rdv["_date"].dt.to_period("W-MON").dt.start_time
+weekly_rdv = weekly_rdv.groupby("Semaine").agg(
+    Effectués=("_status", lambda values: int((values == "completed").sum())),
+    Non_débriefés=("_status", lambda values: int((values == "pending_debrief").sum())),
+).reset_index()
+tleft, tright = st.columns(2)
+with tleft:
+    fig_trend_calls = px.line(weekly_calls, x="Semaine", y="NRP", markers=True, color_discrete_sequence=[ACCENT])
+    fig_trend_calls.update_layout(title="Évolution des NRP · 8 semaines", height=310, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title=None, font_family="DM Sans")
+    fig_trend_calls.update_yaxes(gridcolor="#edf0f4")
+    st.plotly_chart(fig_trend_calls, use_container_width=True)
+with tright:
+    weekly_long = weekly_rdv.melt(id_vars="Semaine", value_vars=["Effectués", "Non_débriefés"], var_name="État", value_name="Rendez-vous")
+    fig_trend_rdv = px.bar(weekly_long, x="Semaine", y="Rendez-vous", color="État", barmode="group", color_discrete_map={"Effectués": "#20a464", "Non_débriefés": "#3478d4"})
+    fig_trend_rdv.update_layout(title="Rendez-vous effectués et à débriefer", height=310, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title=None, font_family="DM Sans", legend_title=None)
+    fig_trend_rdv.update_yaxes(gridcolor="#edf0f4")
+    st.plotly_chart(fig_trend_rdv, use_container_width=True)
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
