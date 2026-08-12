@@ -33,3 +33,10 @@ jobs:
         run: python sync_worker/calendar_sync.py --weeks-back 2
       - name: Envoyer vers Supabase
         run: python sync_worker/migrate_sqlite_to_supabase.py --replace sync_worker/data/leads.sqlite
+      - name: Conserver le diagnostic en cas d'erreur
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-crm-cloud
+          path: sync_worker/diagnostic_cloud/
+          if-no-files-found: ignore
