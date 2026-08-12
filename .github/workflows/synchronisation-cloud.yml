@@ -3,7 +3,9 @@ name: Synchronisation CRM vers Supabase
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    # 03:05 UTC = 05:05 en été / 04:05 en hiver à Paris.
+    # La collecte complète dure environ 55 minutes et est prête avant le matin.
+    - cron: "5 3 * * *"
 
 concurrency:
   group: synchronisation-crm-supabase
@@ -12,7 +14,7 @@ concurrency:
 jobs:
   synchroniser:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
