@@ -2,6 +2,8 @@ name: Synchronisation CRM vers Supabase
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
 
 concurrency:
   group: synchronisation-crm-supabase
