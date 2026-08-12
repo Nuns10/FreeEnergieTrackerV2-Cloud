@@ -98,6 +98,24 @@ def migrate_table(
                 sql.Identifier(table), sql.SQL(", ").join(definitions)
             )
         )
+        # Les tables Supabase peuvent déjà exister avec un ancien schéma.
+        # Ajoute sans risque les nouvelles colonnes produites par le collecteur
+        # (par exemple color_hex et appointment_status) avant l'insertion.
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = %s",
+            (table,),
+        )
+        target_columns = {row[0] for row in cursor.fetchall()}
+        for _cid, name, declared_type, _not_null, _default, _primary_key in columns:
+            if name not in target_columns:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
+                        sql.Identifier(table),
+                        sql.Identifier(name),
+                        sql.SQL(pg_type(declared_type)),
+                    )
+                )
         cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table)))
         existing = cursor.fetchone()[0]
         if existing and not replace:
@@ -147,4 +165,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
