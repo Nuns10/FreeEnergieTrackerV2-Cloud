@@ -20,6 +20,7 @@ from crm_sync import (
     cell_text,
     clean,
     normalize,
+    option_is_selected,
     open_list,
     paginator_text,
     set_100_rows,
@@ -77,20 +78,15 @@ def ensure_table() -> None:
         connection.commit()
 
 
-def clear_status_filter(page) -> None:
-    """Désactive les statuts mémorisés afin d'afficher tout le tunnel."""
+def select_all_statuses(page) -> None:
+    """Sélectionne tous les statuts afin d'afficher tout le tunnel.
+
+    Dans ce CRM, retirer toutes les coches réactive le filtre mémorisé. La
+    méthode fiable consiste donc à cocher explicitement chaque statut.
+    """
     select = status_filter_select(page)
     if select.count() == 0:
         raise RuntimeError("Filtre Statut introuvable dans le CRM.")
-
-    selected_labels = {
-        normalize(item)
-        for item in clean(select.first.inner_text()).split(",")
-        if clean(item)
-    }
-    if not selected_labels:
-        print("Aucun filtre de statut actif.")
-        return
 
     select.first.click(force=True)
     page.wait_for_timeout(500)
@@ -102,21 +98,19 @@ def clear_status_filter(page) -> None:
     for index in range(options.count()):
         option = options.nth(index)
         label = normalize(option.text_content())
-        # Le navigateur cloud ne restitue pas toujours aria-selected. Le
-        # libellé affiché par le champ avant ouverture est la référence fiable.
-        if label in selected_labels or label in TARGET_STATUSES:
+        if label and not option_is_selected(option):
             option.click(force=True)
             page.wait_for_timeout(100)
     page.keyboard.press("Escape")
     page.wait_for_timeout(3500)
     wait_for_rows(page)
     pagination = paginator_text(page)
-    print(f"Filtre Statut retiré. Pagination : {pagination}")
+    print(f"Tous les statuts sont sélectionnés. Pagination : {pagination}")
     match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
     total = int(match.group(1).replace(" ", "")) if match else 0
     if total and total < 5_000:
         raise RuntimeError(
-            f"Le filtre CRM est encore actif ({total} leads seulement)."
+            f"Tous les statuts ne sont pas actifs ({total} leads seulement)."
         )
 
 
@@ -222,7 +216,7 @@ def main() -> None:
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
-        clear_status_filter(page)
+        select_all_statuses(page)
         page_number = 1
         while True:
             rows = extract_rows(page, synced_at)
