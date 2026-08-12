@@ -76,6 +76,13 @@ h1,h2,h3 { font-family:'Manrope',sans-serif!important; color:var(--ink)!importan
 .insight-value { color:#10233f; font-family:'Manrope'; font-size:1.12rem; font-weight:800; margin:11px 0 5px; }
 .insight-note { color:#8491a3; font-size:.79rem; }
 .warning-card { background:linear-gradient(135deg,#fff8f3,#fff); border:1px solid #ffd9c6; border-radius:20px; padding:18px; }
+.action-card { background:#fff; border:1px solid #e5eaf0; border-radius:18px; padding:16px 18px; min-height:112px; box-shadow:0 8px 24px rgba(16,35,63,.05); }
+.action-card.danger { border-left:5px solid #e24d5d; }
+.action-card.blue { border-left:5px solid #3478d4; }
+.action-card.orange { border-left:5px solid #ff6b2c; }
+.action-title { font-family:'Manrope'; color:#10233f; font-weight:800; font-size:.95rem; }
+.action-value { font-family:'Manrope'; color:#10233f; font-weight:800; font-size:1.45rem; margin:6px 0 2px; }
+.action-note { color:#77869a; font-size:.78rem; }
 .stButton>button { border-radius:15px; border:1px solid #dfe5ec; background:#fff; color:#183a65; font-weight:700; min-height:48px; transition:.2s ease; }
 .stButton>button:hover { border-color:#ff6b2c; color:#ff6b2c; transform:translateY(-1px); box-shadow:0 8px 18px rgba(255,107,44,.12); }
 div[data-testid="stPlotlyChart"] { background:#fff; border:1px solid #e6eaf0; border-radius:22px; padding:8px; box-shadow:0 10px 30px rgba(16,35,63,.05); }
@@ -100,6 +107,8 @@ div[data-testid="stPlotlyChart"] { background:#fff; border:1px solid #e6eaf0; bo
   .insight{min-height:auto;padding:14px;border-radius:16px;}
   .insight-value{font-size:1rem;margin:8px 0 4px;}
   .warning-card{padding:14px;border-radius:16px;}
+  .action-card{min-height:auto;padding:13px 14px;border-radius:15px;}
+  .action-value{font-size:1.2rem;}
   .stButton>button{min-height:44px;border-radius:13px;}
   div[data-testid="stPlotlyChart"]{border-radius:16px;padding:3px;overflow:hidden;}
   [data-testid="stDataFrame"]{border-radius:14px;overflow-x:auto;}
@@ -341,6 +350,37 @@ k4.metric("Annulés / non faits", cancelled_total + not_completed_total,
 k5.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
 if decided_total == 0 and not events.empty:
     st.info("Les rendez-vous sont présents, mais leurs couleurs/statuts attendent la prochaine synchronisation calendrier. Les zéros ne signifient pas qu'aucun rendez-vous n'a été effectué.")
+
+# Synthèse immédiatement exploitable par la direction.
+today = now.normalize()
+today_events = events[events["_date"].eq(today)].copy()
+today_pending = int(today_events["_status"].eq("pending_debrief").sum())
+team_pending = team.sort_values("Non débriefés", ascending=False).iloc[0]
+team_missed = team.sort_values("Jours ratés", ascending=False).iloc[0]
+team_completion = team[team["Taux effectué"].notna()].sort_values("Taux effectué", ascending=True)
+lowest_completion = team_completion.iloc[0] if not team_completion.empty else None
+
+st.markdown('<div class="section-title"><span></span>Direction du jour</div>', unsafe_allow_html=True)
+a1, a2, a3, a4 = st.columns(4)
+direction_cards = [
+    (a1, "blue", "À débriefer aujourd’hui", str(today_pending), "Rendez-vous bleus à traiter en priorité"),
+    (a2, "blue", "Plus gros stock à débriefer", html.escape(str(team_pending["Commercial"])), f'{int(team_pending["Non débriefés"])} rendez-vous en attente'),
+    (a3, "danger", "Discipline à reprendre", html.escape(str(team_missed["Commercial"])), f'{int(team_missed["Jours ratés"])} jours sans action'),
+    (a4, "orange", "Taux effectué le plus faible", html.escape(str(lowest_completion["Commercial"])) if lowest_completion is not None else "À confirmer", f'{int(lowest_completion["Taux effectué"])}% sur la période' if lowest_completion is not None else "Données insuffisantes"),
+]
+for target, css, title, value, note in direction_cards:
+    with target:
+        st.markdown(f'<div class="action-card {css}"><div class="action-title">{title}</div><div class="action-value">{value}</div><div class="action-note">{note}</div></div>', unsafe_allow_html=True)
+
+alert_rows = team[(team["Non débriefés"] > 0) | (team["Jours ratés"] > 0)].copy()
+alert_rows["Priorité"] = (alert_rows["Non débriefés"] * 3 + alert_rows["Jours ratés"] * 2 + alert_rows["Non effectués"]).astype(int)
+alert_rows = alert_rows.sort_values(["Priorité", "Non débriefés"], ascending=False)
+with st.expander(f"Plan d’action prioritaire · {len(alert_rows)} commercial(aux)", expanded=False):
+    st.dataframe(
+        alert_rows[["Commercial", "Non débriefés", "Non effectués", "Jours ratés", "Taux effectué"]].head(12),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 st.markdown('<div class="section-title"><span></span>Choisir un commercial</div>', unsafe_allow_html=True)
 for offset in range(0, len(team), 5):
