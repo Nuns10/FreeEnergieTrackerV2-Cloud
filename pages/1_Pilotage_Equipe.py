@@ -128,6 +128,16 @@ def fake_person(value) -> bool:
     )
 
 
+def parse_calendar_dates(values: pd.Series) -> pd.Series:
+    """Les dates du collecteur calendrier sont stockées en ISO AAAA-MM-JJ."""
+    text = values.fillna("").astype(str).str.strip()
+    iso = pd.to_datetime(text.str.slice(0, 10), format="%Y-%m-%d", errors="coerce")
+    missing = iso.isna()
+    if missing.any():
+        iso.loc[missing] = pd.to_datetime(text.loc[missing], errors="coerce", dayfirst=True)
+    return iso.dt.normalize()
+
+
 raw_leads, raw_calls, raw_events, raw_daily = load_data()
 if raw_leads.empty:
     st.error("Les données CRM ne sont pas encore disponibles.")
@@ -181,7 +191,7 @@ if not events.empty:
     event_color = column(events, "color_hex", "calendar_color")
     events["_person"] = events[event_person].fillna("").astype(str).map(clean) if event_person else ""
     events["_person_n"] = events["_person"].map(norm)
-    events["_date"] = pd.to_datetime(events[event_date], errors="coerce", dayfirst=True).dt.normalize() if event_date else pd.NaT
+    events["_date"] = parse_calendar_dates(events[event_date]) if event_date else pd.NaT
     events["_title"] = events[event_title].fillna("").astype(str) if event_title else ""
     events["_status"] = events[event_status].fillna("").astype(str) if event_status else ""
     events["_color"] = events[event_color].fillna("").astype(str) if event_color else ""
@@ -230,7 +240,7 @@ for person in people:
     not_completed_rdv = int(ep["_status"].eq("not_completed").sum())
     pending_rdv = int(ep["_status"].eq("pending_debrief").sum())
     decided_rdv = completed_rdv + pending_rdv + cancelled_rdv + not_completed_rdv
-    completion_rate = round(completed_rdv / max(decided_rdv, 1) * 100)
+    completion_rate = round(completed_rdv / decided_rdv * 100) if decided_rdv else None
     relances = lp[lp["_status"].str.contains("A RELANCER", na=False)]
     rows.append({
         "Commercial": person,
@@ -278,14 +288,16 @@ pending_total = int(events["_status"].eq("pending_debrief").sum())
 cancelled_total = int(events["_status"].eq("cancelled").sum())
 not_completed_total = int(events["_status"].eq("not_completed").sum())
 decided_total = completed_total + pending_total + cancelled_total + not_completed_total
-completion_total = round(completed_total / max(decided_total, 1) * 100)
+completion_total = round(completed_total / decided_total * 100) if decided_total else None
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("R1/R2 à venir", len(future_events))
-k2.metric("Taux effectués", f"{completion_total}%")
+k2.metric("Taux effectués", f"{completion_total}%" if completion_total is not None else "En attente")
 k3.metric("Non débriefés", pending_total, delta="À traiter" if pending_total else "RAS", delta_color="inverse")
 k4.metric("Annulés / non faits", cancelled_total + not_completed_total,
           help=f"{cancelled_total} annulé(s) · {not_completed_total} non effectué(s)")
 k5.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
+if decided_total == 0 and not events.empty:
+    st.info("Les rendez-vous sont présents, mais leurs couleurs/statuts attendent la prochaine synchronisation calendrier. Les zéros ne signifient pas qu'aucun rendez-vous n'a été effectué.")
 
 st.markdown('<div class="section-title"><span></span>Choisir un commercial</div>', unsafe_allow_html=True)
 for offset in range(0, len(team), 5):
@@ -386,12 +398,12 @@ st.markdown('<div class="section-title"><span></span>Rythme et discipline commer
 left, right = st.columns([1.55, 1])
 with left:
     if p_period_calls.empty:
-        st.info("Aucun appel enregistré sur cette période.")
+        st.info("Aucun NRP enregistré sur cette période.")
     else:
-        daily = p_period_calls.assign(Jour=p_period_calls["_dt"].dt.normalize()).groupby("Jour").size().reset_index(name="Appels")
-        fig = px.bar(daily, x="Jour", y="Appels", color_discrete_sequence=[ACCENT])
-        fig.update_traces(marker_line_width=0, hovertemplate="%{x|%d/%m}<br><b>%{y} appels</b><extra></extra>")
-        fig.update_layout(title="Appels par jour", height=350, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_family="DM Sans", xaxis_title=None, yaxis_title=None, showlegend=False)
+        daily = p_period_calls.assign(Jour=p_period_calls["_dt"].dt.normalize()).groupby("Jour").size().reset_index(name="NRP")
+        fig = px.bar(daily, x="Jour", y="NRP", color_discrete_sequence=[ACCENT])
+        fig.update_traces(marker_line_width=0, hovertemplate="%{x|%d/%m}<br><b>%{y} NRP</b><extra></extra>")
+        fig.update_layout(title="NRP par jour", height=350, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_family="DM Sans", xaxis_title=None, yaxis_title=None, showlegend=False)
         fig.update_xaxes(showgrid=False)
         fig.update_yaxes(gridcolor="#edf0f4")
         st.plotly_chart(fig, use_container_width=True)
@@ -400,7 +412,7 @@ with right:
     fig = go.Figure()
     fig.add_vrect(x0=12, x1=14, fillcolor="#ff6b2c", opacity=.10, line_width=0)
     fig.add_vrect(x0=18.5, x1=24, fillcolor="#183a65", opacity=.08, line_width=0)
-    fig.add_trace(go.Histogram(x=hours["Heure"], xbins=dict(start=8, end=24, size=1), marker_color=NAVY, hovertemplate="%{x:.0f}h : %{y} appels<extra></extra>"))
+    fig.add_trace(go.Histogram(x=hours["Heure"], xbins=dict(start=8, end=24, size=1), marker_color=NAVY, hovertemplate="%{x:.0f}h : %{y} NRP<extra></extra>"))
     fig.update_layout(title="Répartition horaire", height=350, margin=dict(l=18, r=18, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_family="DM Sans", xaxis_title=None, yaxis_title=None, bargap=.18, showlegend=False)
     fig.update_xaxes(range=[8, 24], dtick=2, showgrid=False)
     fig.update_yaxes(gridcolor="#edf0f4")
@@ -420,7 +432,7 @@ with detail_left:
             css_class, icon, label = "#e8f8ef", "●", "R1/R2"
             icon_color = "#20a464"
         elif has_call:
-            css_class, icon, label = "#fff4e9", "●", "Appels"
+            css_class, icon, label = "#fff4e9", "●", "NRP"
             icon_color = "#f08a33"
         else:
             css_class, icon, label = "#fff0f1", "●", "Sans action"
@@ -432,18 +444,19 @@ with detail_left:
         )
     st.markdown(
         '<div style="display:flex;gap:7px;flex-wrap:wrap">' + "".join(calendar_cells) + "</div>"
-        '<div class="quiet" style="margin-top:10px">🟢 R1/R2 · 🟠 appels sans RDV · 🔴 aucune action</div>',
+        '<div class="quiet" style="margin-top:10px">🟢 R1/R2 · 🟠 NRP sans RDV · 🔴 aucune action connue</div>',
         unsafe_allow_html=True,
     )
 with detail_right:
-    st.markdown('<div class="section-title"><span></span>Dernières actions</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title"><span></span>Derniers NRP synchronisés</div>', unsafe_allow_html=True)
     if pc.empty:
-        st.info("Aucun appel disponible.")
+        st.info("Aucun NRP disponible.")
     else:
         last_actions = pc.head(20)[["_dt", "_id"]].copy()
         last_actions["Prospect"] = last_actions["_id"].map(prospect_map).fillna("Lead CRM")
         last_actions["Date"] = last_actions["_dt"].dt.strftime("%d/%m/%Y %H:%M")
         st.dataframe(last_actions[["Date", "Prospect"]], use_container_width=True, hide_index=True, height=390)
+        st.caption("Cette liste montre les événements NRP collectés dans l'historique des leads, pas toutes les actions du CRM.")
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
@@ -462,7 +475,7 @@ with rank_left:
     calls_rank = compare.sort_values("NRP / jour", ascending=True)
     calls_rank["Couleur"] = calls_rank["Commercial"].map(lambda name: "Sélection" if name == person else "Équipe")
     fig_calls = px.bar(calls_rank, x="NRP / jour", y="Commercial", orientation="h", color="Couleur", color_discrete_map={"Sélection": ACCENT, "Équipe": "#d9e1eb"})
-    fig_calls.update_layout(title="Intensité d'appels", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, font_family="DM Sans", yaxis_title=None)
+    fig_calls.update_layout(title="Intensité des NRP", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, font_family="DM Sans", yaxis_title=None)
     fig_calls.update_xaxes(gridcolor="#edf0f4")
     st.plotly_chart(fig_calls, use_container_width=True)
 with rank_right:
