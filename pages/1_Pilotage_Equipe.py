@@ -115,6 +115,19 @@ def person_initials(person: str) -> str:
     return "".join(w[0] for w in words[:2]).upper() or "FE"
 
 
+def fake_person(value) -> bool:
+    """Détecte les faux noms produits par certains blocs d'historique CRM."""
+    text = clean(value)
+    normalized = norm(text)
+    return (
+        not text
+        or normalized.startswith("NRP")
+        or bool(re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", text))
+        or bool(re.search(r"\d{1,2}:\d{2}", text))
+        or len(text) > 80
+    )
+
+
 raw_leads, raw_calls, raw_events, raw_daily = load_data()
 if raw_leads.empty:
     st.error("Les données CRM ne sont pas encore disponibles.")
@@ -151,7 +164,8 @@ if not calls.empty:
     owner_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_person"].to_dict()
     calls["_id"] = calls[call_id].astype(str) if call_id else calls.index.astype(str)
     calls["_person"] = calls[call_person].fillna("").astype(str).map(clean) if call_person else ""
-    calls.loc[calls["_person"].eq(""), "_person"] = calls.loc[calls["_person"].eq(""), "_id"].map(owner_map).fillna("")
+    invalid_person = calls["_person"].map(fake_person) | calls["_person"].map(norm).isin(EXCLUDED)
+    calls.loc[invalid_person, "_person"] = calls.loc[invalid_person, "_id"].map(owner_map).fillna("")
     calls["_person_n"] = calls["_person"].map(norm)
     calls["_dt"] = pd.to_datetime(calls[call_date], errors="coerce", dayfirst=True) if call_date else pd.NaT
     calls = calls[calls["_dt"].notna() & calls["_person"].ne("") & ~calls["_person_n"].isin(EXCLUDED)].copy()
