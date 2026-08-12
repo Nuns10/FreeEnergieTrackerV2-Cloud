@@ -227,9 +227,10 @@ for person in people:
     strategic = cp[((cp["_dt"].dt.hour >= 12) & (cp["_dt"].dt.hour < 14)) | ((cp["_dt"].dt.hour * 60 + cp["_dt"].dt.minute) >= 1110)]
     completed_rdv = int(ep["_status"].eq("completed").sum())
     cancelled_rdv = int(ep["_status"].eq("cancelled").sum())
+    not_completed_rdv = int(ep["_status"].eq("not_completed").sum())
     pending_rdv = int(ep["_status"].eq("pending_debrief").sum())
-    past_rdv = ep[ep["_date"] < now.normalize()]
-    completion_rate = round(completed_rdv / max(len(past_rdv), 1) * 100)
+    decided_rdv = completed_rdv + pending_rdv + cancelled_rdv + not_completed_rdv
+    completion_rate = round(completed_rdv / max(decided_rdv, 1) * 100)
     relances = lp[lp["_status"].str.contains("A RELANCER", na=False)]
     rows.append({
         "Commercial": person,
@@ -241,6 +242,7 @@ for person in people:
         "Effectués": completed_rdv,
         "Non débriefés": pending_rdv,
         "Annulés": cancelled_rdv,
+        "Non effectués": not_completed_rdv,
         "Taux effectué": completion_rate,
         "Jours ratés": len(missed),
         "Appels stratégiques": len(strategic),
@@ -274,12 +276,15 @@ past_events = events[events["_date"] < now.normalize()]
 completed_total = int(events["_status"].eq("completed").sum())
 pending_total = int(events["_status"].eq("pending_debrief").sum())
 cancelled_total = int(events["_status"].eq("cancelled").sum())
-completion_total = round(completed_total / max(len(past_events), 1) * 100)
+not_completed_total = int(events["_status"].eq("not_completed").sum())
+decided_total = completed_total + pending_total + cancelled_total + not_completed_total
+completion_total = round(completed_total / max(decided_total, 1) * 100)
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("R1/R2 à venir", len(future_events))
 k2.metric("Taux effectués", f"{completion_total}%")
 k3.metric("Non débriefés", pending_total, delta="À traiter" if pending_total else "RAS", delta_color="inverse")
-k4.metric("Annulés / non faits", cancelled_total)
+k4.metric("Annulés / non faits", cancelled_total + not_completed_total,
+          help=f"{cancelled_total} annulé(s) · {not_completed_total} non effectué(s)")
 k5.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
 
 st.markdown('<div class="section-title"><span></span>Choisir un commercial</div>', unsafe_allow_html=True)
@@ -287,7 +292,7 @@ for offset in range(0, len(team), 5):
     cols = st.columns(5)
     for col_ui, (_, item) in zip(cols, team.iloc[offset:offset + 5].iterrows()):
         with col_ui:
-            label = f"{item['Commercial']}\n\n{int(item['Appels'])} appels · {int(item['Jours ratés'])} jour(s) raté(s)"
+            label = f"{item['Commercial']}\n\n{int(item['Appels'])} NRP · {int(item['Jours ratés'])} jour(s) raté(s)"
             if st.button(label, key=f"person_{norm(item['Commercial'])}", use_container_width=True):
                 st.session_state.selected_person = item["Commercial"]
                 st.rerun()
@@ -323,7 +328,7 @@ last_midday = midday["_dt"].max() if not midday.empty else pd.NaT
 last_evening = evening["_dt"].max() if not evening.empty else pd.NaT
 i1, i2, i3, i4 = st.columns(4)
 cards = [
-    (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{last_nrp_name} · {int(row['Appels'])} appel(s)"),
+    (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{last_nrp_name} · {int(row['Appels'])} NRP sur {period_label}"),
     (i2, "Jour sans R1/R2 et sans appel", f"{len(missed)} jour(s)", missed[-1].strftime("Dernier : %d/%m/%Y") if missed else "Aucun jour raté"),
     (i3, "Dernier appel entre 12h et 14h", last_midday.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_midday) else "Jamais", f"{len(midday[midday['_dt'] >= start])} sur la période"),
     (i4, "Dernier appel après 18h30", last_evening.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_evening) else "Jamais", f"{len(evening[evening['_dt'] >= start])} sur la période"),
@@ -336,14 +341,16 @@ st.markdown('<div class="section-title"><span></span>Rendez-vous R1 / R2</div>',
 status_labels = {
     "completed": "Effectué",
     "pending_debrief": "Non débriefé",
-    "cancelled": "Annulé / non effectué",
+    "cancelled": "Annulé",
+    "not_completed": "Non effectué",
     "scheduled": "À venir",
     "unknown": "État à confirmer",
 }
 status_colors = {
     "completed": "🟢",
-    "pending_debrief": "🟡",
+    "pending_debrief": "🔵",
     "cancelled": "🔴",
+    "not_completed": "🟣",
     "scheduled": "🔵",
     "unknown": "⚪",
 }
@@ -440,21 +447,21 @@ with detail_right:
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
-compare["Appels / jour"] = (compare["Appels"] / max(len(business_days), 1)).round(1)
+compare["NRP / jour"] = (compare["Appels"] / max(len(business_days), 1)).round(1)
 selected_compare = compare[compare["Commercial"] == person].iloc[0]
-median_calls = compare["Appels / jour"].median()
+median_calls = compare["NRP / jour"].median()
 median_missed = compare["Jours ratés"].median()
 median_rdv = compare["R1/R2"].median()
 c1, c2, c3 = st.columns(3)
-c1.metric("Appels/jour vs équipe", selected_compare["Appels / jour"], delta=f"{selected_compare['Appels / jour'] - median_calls:+.1f} vs médiane")
+c1.metric("NRP/jour vs équipe", selected_compare["NRP / jour"], delta=f"{selected_compare['NRP / jour'] - median_calls:+.1f} vs médiane")
 c2.metric("Jours sans action vs équipe", int(selected_compare["Jours ratés"]), delta=f"{selected_compare['Jours ratés'] - median_missed:+.0f} vs médiane", delta_color="inverse")
 c3.metric("R1/R2 vs équipe", int(selected_compare["R1/R2"]), delta=f"{selected_compare['R1/R2'] - median_rdv:+.0f} vs médiane")
 
 rank_left, rank_right = st.columns(2)
 with rank_left:
-    calls_rank = compare.sort_values("Appels / jour", ascending=True)
+    calls_rank = compare.sort_values("NRP / jour", ascending=True)
     calls_rank["Couleur"] = calls_rank["Commercial"].map(lambda name: "Sélection" if name == person else "Équipe")
-    fig_calls = px.bar(calls_rank, x="Appels / jour", y="Commercial", orientation="h", color="Couleur", color_discrete_map={"Sélection": ACCENT, "Équipe": "#d9e1eb"})
+    fig_calls = px.bar(calls_rank, x="NRP / jour", y="Commercial", orientation="h", color="Couleur", color_discrete_map={"Sélection": ACCENT, "Équipe": "#d9e1eb"})
     fig_calls.update_layout(title="Intensité d'appels", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, font_family="DM Sans", yaxis_title=None)
     fig_calls.update_xaxes(gridcolor="#edf0f4")
     st.plotly_chart(fig_calls, use_container_width=True)
@@ -467,5 +474,5 @@ with rank_right:
     st.plotly_chart(fig_missed, use_container_width=True)
 
 with st.expander("Voir tous les chiffres de l'équipe"):
-    st.dataframe(compare[["Commercial", "Appels / jour", "R1/R2", "Taux effectué", "Non débriefés", "Annulés", "Jours ratés", "À relancer"]], use_container_width=True, hide_index=True)
+    st.dataframe(compare[["Commercial", "NRP / jour", "R1/R2", "Taux effectué", "Non débriefés", "Annulés", "Non effectués", "Jours ratés", "À relancer"]], use_container_width=True, hide_index=True)
 st.caption("Pulse Direction · Lecture managériale des données CRM et calendriers synchronisés dans Supabase.")
