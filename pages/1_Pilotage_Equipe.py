@@ -177,13 +177,20 @@ if not events.empty:
     event_person = column(events, "commercial", "intervenant")
     event_date = column(events, "event_date", "date")
     event_title = column(events, "title", "name")
+    event_status = column(events, "status_kind", "appointment_status")
+    event_color = column(events, "color_hex", "calendar_color")
     events["_person"] = events[event_person].fillna("").astype(str).map(clean) if event_person else ""
     events["_person_n"] = events["_person"].map(norm)
     events["_date"] = pd.to_datetime(events[event_date], errors="coerce", dayfirst=True).dt.normalize() if event_date else pd.NaT
     events["_title"] = events[event_title].fillna("").astype(str) if event_title else ""
+    events["_status"] = events[event_status].fillna("").astype(str) if event_status else ""
+    events["_color"] = events[event_color].fillna("").astype(str) if event_color else ""
     events = events[events["_date"].notna() & events["_title"].str.contains(r"(?<![A-Za-z0-9])R\s*[12](?![A-Za-z0-9])", case=False, regex=True, na=False)].copy()
+    missing_status = events["_status"].eq("")
+    events.loc[missing_status & (events["_date"] >= pd.Timestamp.now().normalize()), "_status"] = "scheduled"
+    events.loc[missing_status & (events["_date"] < pd.Timestamp.now().normalize()), "_status"] = "unknown"
 else:
-    events = pd.DataFrame(columns=["_person", "_person_n", "_date", "_title"])
+    events = pd.DataFrame(columns=["_person", "_person_n", "_date", "_title", "_status", "_color"])
 
 now = pd.Timestamp.now()
 period_options = {"7 jours": 7, "14 jours": 14, "30 jours": 30, "8 semaines": 56}
@@ -218,6 +225,11 @@ for person in people:
     missed = [d for d in business_days if d not in call_days and d not in rdv_days]
     missed_by_person[person] = missed
     strategic = cp[((cp["_dt"].dt.hour >= 12) & (cp["_dt"].dt.hour < 14)) | ((cp["_dt"].dt.hour * 60 + cp["_dt"].dt.minute) >= 1110)]
+    completed_rdv = int(ep["_status"].eq("completed").sum())
+    cancelled_rdv = int(ep["_status"].eq("cancelled").sum())
+    pending_rdv = int(ep["_status"].eq("pending_debrief").sum())
+    past_rdv = ep[ep["_date"] < now.normalize()]
+    completion_rate = round(completed_rdv / max(len(past_rdv), 1) * 100)
     relances = lp[lp["_status"].str.contains("A RELANCER", na=False)]
     rows.append({
         "Commercial": person,
@@ -226,6 +238,10 @@ for person in people:
         "À relancer": len(relances),
         "NRP": int(lp["_nrp"].sum()),
         "R1/R2": len(ep),
+        "Effectués": completed_rdv,
+        "Non débriefés": pending_rdv,
+        "Annulés": cancelled_rdv,
+        "Taux effectué": completion_rate,
         "Jours ratés": len(missed),
         "Appels stratégiques": len(strategic),
         "Dernier NRP": cp["_dt"].max() if not cp.empty else pd.NaT,
@@ -253,12 +269,18 @@ st.markdown(
 total_missed = int(team["Jours ratés"].sum())
 total_strategic = int(team["Appels stratégiques"].sum())
 latest_team_call = calls["_dt"].max() if not calls.empty else pd.NaT
+future_events = events[events["_date"] >= now.normalize()]
+past_events = events[events["_date"] < now.normalize()]
+completed_total = int(events["_status"].eq("completed").sum())
+pending_total = int(events["_status"].eq("pending_debrief").sum())
+cancelled_total = int(events["_status"].eq("cancelled").sum())
+completion_total = round(completed_total / max(len(past_events), 1) * 100)
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Appels · période", f"{len(period_calls):,}".replace(",", " "))
-k2.metric("R1 / R2", len(period_events))
-k3.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
-k4.metric("Appels midi / soir", total_strategic)
-k5.metric("Dernier appel équipe", latest_team_call.strftime("%d/%m %H:%M") if pd.notna(latest_team_call) else "—")
+k1.metric("R1/R2 à venir", len(future_events))
+k2.metric("Taux effectués", f"{completion_total}%")
+k3.metric("Non débriefés", pending_total, delta="À traiter" if pending_total else "RAS", delta_color="inverse")
+k4.metric("Annulés / non faits", cancelled_total)
+k5.metric("Jours sans action", total_missed, delta="À expliquer" if total_missed else "RAS", delta_color="inverse")
 
 st.markdown('<div class="section-title"><span></span>Choisir un commercial</div>', unsafe_allow_html=True)
 for offset in range(0, len(team), 5):
@@ -310,6 +332,49 @@ for target, label, value, note in cards:
     with target:
         st.markdown(f'<div class="insight"><div class="insight-label">{label}</div><div class="insight-value">{value}</div><div class="insight-note">{note}</div></div>', unsafe_allow_html=True)
 
+st.markdown('<div class="section-title"><span></span>Rendez-vous R1 / R2</div>', unsafe_allow_html=True)
+status_labels = {
+    "completed": "Effectué",
+    "pending_debrief": "Non débriefé",
+    "cancelled": "Annulé / non effectué",
+    "scheduled": "À venir",
+    "unknown": "État à confirmer",
+}
+status_colors = {
+    "completed": "🟢",
+    "pending_debrief": "🟡",
+    "cancelled": "🔴",
+    "scheduled": "🔵",
+    "unknown": "⚪",
+}
+person_future = pe[pe["_date"] >= now.normalize()].sort_values(["_date"])
+person_past = pe[pe["_date"] < now.normalize()].sort_values(["_date"], ascending=False)
+rdv_a, rdv_b = st.tabs([f"À venir · {len(person_future)}", f"Passés · {len(person_past)}"])
+
+def appointment_view(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    view = frame.copy()
+    view["État"] = view["_status"].map(lambda value: f"{status_colors.get(value, '⚪')} {status_labels.get(value, value)}")
+    view["Date"] = view["_date"].dt.strftime("%d/%m/%Y")
+    start_col = column(view, "start_time")
+    view["Heure"] = view[start_col].fillna("—").astype(str) if start_col else "—"
+    view["Rendez-vous"] = view["_title"]
+    return view[["Date", "Heure", "Rendez-vous", "État"]]
+
+with rdv_a:
+    future_view = appointment_view(person_future)
+    if future_view.empty:
+        st.info("Aucun R1/R2 à venir détecté pour ce commercial.")
+    else:
+        st.dataframe(future_view.head(30), use_container_width=True, hide_index=True, height=min(360, 38 * len(future_view.head(30)) + 38))
+with rdv_b:
+    past_view = appointment_view(person_past)
+    if past_view.empty:
+        st.info("Aucun R1/R2 passé sur cette période.")
+    else:
+        st.dataframe(past_view.head(30), use_container_width=True, hide_index=True, height=min(360, 38 * len(past_view.head(30)) + 38))
+
 st.markdown('<div class="section-title"><span></span>Rythme et discipline commerciale</div>', unsafe_allow_html=True)
 left, right = st.columns([1.55, 1])
 with left:
@@ -336,12 +401,33 @@ with right:
 
 detail_left, detail_right = st.columns([1, 1.25])
 with detail_left:
-    st.markdown('<div class="section-title"><span></span>Jours ratés à expliquer</div>', unsafe_allow_html=True)
-    if missed:
-        missed_view = pd.DataFrame({"Date": [d.strftime("%A %d/%m/%Y").capitalize() for d in reversed(missed)]})
-        st.dataframe(missed_view, use_container_width=True, hide_index=True, height=min(390, 38 * len(missed_view) + 38))
-    else:
-        st.success("Aucun jour ouvré sans R1/R2 et sans appel sur la période.")
+    st.markdown('<div class="section-title"><span></span>Calendrier d’activité</div>', unsafe_allow_html=True)
+    person_call_days = set(p_period_calls["_dt"].dt.normalize())
+    person_rdv_days = set(pe["_date"])
+    french_days = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    calendar_cells = []
+    for activity_day in business_days[-30:]:
+        has_call = activity_day in person_call_days
+        has_rdv = activity_day in person_rdv_days
+        if has_rdv:
+            css_class, icon, label = "#e8f8ef", "●", "R1/R2"
+            icon_color = "#20a464"
+        elif has_call:
+            css_class, icon, label = "#fff4e9", "●", "Appels"
+            icon_color = "#f08a33"
+        else:
+            css_class, icon, label = "#fff0f1", "●", "Sans action"
+            icon_color = "#e24d5d"
+        calendar_cells.append(
+            f'<div style="background:{css_class};border-radius:12px;padding:9px 7px;min-width:76px;text-align:center">'
+            f'<div style="font-weight:800;color:#10233f">{french_days[activity_day.weekday()]} {activity_day.day:02d}</div>'
+            f'<div style="font-size:.72rem;color:{icon_color};margin-top:3px">{icon} {label}</div></div>'
+        )
+    st.markdown(
+        '<div style="display:flex;gap:7px;flex-wrap:wrap">' + "".join(calendar_cells) + "</div>"
+        '<div class="quiet" style="margin-top:10px">🟢 R1/R2 · 🟠 appels sans RDV · 🔴 aucune action</div>',
+        unsafe_allow_html=True,
+    )
 with detail_right:
     st.markdown('<div class="section-title"><span></span>Dernières actions</div>', unsafe_allow_html=True)
     if pc.empty:
@@ -353,14 +439,33 @@ with detail_right:
         st.dataframe(last_actions[["Date", "Prospect"]], use_container_width=True, hide_index=True, height=390)
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
-compare = team[["Commercial", "Score", "Appels", "R1/R2", "Jours ratés", "Appels stratégiques", "À relancer"]].copy()
-st.dataframe(
-    compare,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
-        "Jours ratés": st.column_config.NumberColumn("Jours ratés", help="Jour ouvré sans R1/R2 et sans appel"),
-    },
-)
+compare = team.copy()
+compare["Appels / jour"] = (compare["Appels"] / max(len(business_days), 1)).round(1)
+selected_compare = compare[compare["Commercial"] == person].iloc[0]
+median_calls = compare["Appels / jour"].median()
+median_missed = compare["Jours ratés"].median()
+median_rdv = compare["R1/R2"].median()
+c1, c2, c3 = st.columns(3)
+c1.metric("Appels/jour vs équipe", selected_compare["Appels / jour"], delta=f"{selected_compare['Appels / jour'] - median_calls:+.1f} vs médiane")
+c2.metric("Jours sans action vs équipe", int(selected_compare["Jours ratés"]), delta=f"{selected_compare['Jours ratés'] - median_missed:+.0f} vs médiane", delta_color="inverse")
+c3.metric("R1/R2 vs équipe", int(selected_compare["R1/R2"]), delta=f"{selected_compare['R1/R2'] - median_rdv:+.0f} vs médiane")
+
+rank_left, rank_right = st.columns(2)
+with rank_left:
+    calls_rank = compare.sort_values("Appels / jour", ascending=True)
+    calls_rank["Couleur"] = calls_rank["Commercial"].map(lambda name: "Sélection" if name == person else "Équipe")
+    fig_calls = px.bar(calls_rank, x="Appels / jour", y="Commercial", orientation="h", color="Couleur", color_discrete_map={"Sélection": ACCENT, "Équipe": "#d9e1eb"})
+    fig_calls.update_layout(title="Intensité d'appels", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, font_family="DM Sans", yaxis_title=None)
+    fig_calls.update_xaxes(gridcolor="#edf0f4")
+    st.plotly_chart(fig_calls, use_container_width=True)
+with rank_right:
+    missed_rank = compare.sort_values("Jours ratés", ascending=False)
+    missed_rank["Couleur"] = missed_rank["Commercial"].map(lambda name: "Sélection" if name == person else "Équipe")
+    fig_missed = px.bar(missed_rank, x="Jours ratés", y="Commercial", orientation="h", color="Couleur", color_discrete_map={"Sélection": ACCENT, "Équipe": "#d9e1eb"})
+    fig_missed.update_layout(title="Jours sans action", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False, font_family="DM Sans", yaxis_title=None)
+    fig_missed.update_xaxes(gridcolor="#edf0f4")
+    st.plotly_chart(fig_missed, use_container_width=True)
+
+with st.expander("Voir tous les chiffres de l'équipe"):
+    st.dataframe(compare[["Commercial", "Appels / jour", "R1/R2", "Taux effectué", "Non débriefés", "Annulés", "Jours ratés", "À relancer"]], use_container_width=True, hide_index=True)
 st.caption("Pulse Direction · Lecture managériale des données CRM et calendriers synchronisés dans Supabase.")
