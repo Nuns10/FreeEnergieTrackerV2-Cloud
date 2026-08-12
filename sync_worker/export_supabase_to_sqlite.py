@@ -17,10 +17,12 @@ def main() -> None:
     from database import migrate_database
     from crm_sync import ensure_call_events_table
     from calendar_sync import ensure_tables
+    from funnel_sync import ensure_table as ensure_funnel_table
 
     migrate_database()
     ensure_call_events_table()
     ensure_tables()
+    ensure_funnel_table()
 
     url = os.environ["DATABASE_URL"]
     TARGET.parent.mkdir(parents=True, exist_ok=True)
