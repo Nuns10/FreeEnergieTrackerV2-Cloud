@@ -32,7 +32,7 @@ jobs:
       - name: Synchroniser les leads et appels
         run: python sync_worker/crm_sync.py
       - name: Synchroniser les calendriers récents
-        run: python sync_worker/calendar_sync.py --weeks-back 2
+        run: python sync_worker/calendar_sync.py --weeks-back 8 --weeks-forward 8
       - name: Envoyer vers Supabase
         run: python sync_worker/migrate_sqlite_to_supabase.py --replace sync_worker/data/leads.sqlite
       - name: Conserver le diagnostic en cas d'erreur
