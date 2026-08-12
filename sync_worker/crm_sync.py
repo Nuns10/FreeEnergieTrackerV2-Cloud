@@ -145,7 +145,14 @@ def apply_target_statuses(page: Page) -> None:
             "La liste des statuts ne s’est pas ouverte."
         )
 
-    options = panel.locator("mat-option, [role='option']")
+    # Utiliser une recherche globale dans l'overlay. Le contexte GitHub
+    # Actions expose bien le panneau mais peut retourner zéro descendant
+    # lorsque le locator est resserré sur le listbox Angular.
+    options = page.locator(
+        ".cdk-overlay-pane mat-option[role='option'], "
+        ".cdk-overlay-pane [role='option']"
+    )
+    options.first.wait_for(state="attached", timeout=5_000)
     found_targets: set[str] = set()
     visible_labels: list[str] = []
 
