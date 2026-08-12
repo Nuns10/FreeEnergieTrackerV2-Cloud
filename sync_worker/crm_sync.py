@@ -152,7 +152,18 @@ def apply_target_statuses(page: Page) -> None:
         ".cdk-overlay-pane mat-option[role='option'], "
         ".cdk-overlay-pane [role='option']"
     )
-    options.first.wait_for(state="attached", timeout=5_000)
+    options.first.wait_for(state="attached", timeout=15_000)
+    # Angular attache parfois les options avant d'injecter leur libellé,
+    # surtout sur les runners GitHub sans écran. Attendre les textes évite
+    # de conclure à tort que les statuts ont disparu du CRM.
+    for _ in range(30):
+        option_labels = [
+            normalize(options.nth(i).text_content())
+            for i in range(options.count())
+        ]
+        if any(option_labels):
+            break
+        page.wait_for_timeout(250)
     found_targets: set[str] = set()
     visible_labels: list[str] = []
 
