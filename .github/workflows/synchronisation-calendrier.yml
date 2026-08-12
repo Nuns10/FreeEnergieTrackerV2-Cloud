@@ -37,11 +37,10 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Restaurer la base depuis Supabase
-        run: python sync_worker/export_supabase_to_sqlite.py data/leads.sqlite
+        run: python sync_worker/export_supabase_to_sqlite.py
 
       - name: Synchroniser les rendez-vous passés et à venir
         run: python sync_worker/calendar_sync.py --weeks-back 8 --weeks-forward 8
 
       - name: Publier les rendez-vous dans Supabase
-        run: python sync_worker/migrate_sqlite_to_supabase.py data/leads.sqlite --replace
-
+        run: python sync_worker/migrate_sqlite_to_supabase.py --replace sync_worker/data/leads.sqlite
