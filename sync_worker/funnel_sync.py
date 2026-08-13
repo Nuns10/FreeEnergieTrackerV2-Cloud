@@ -37,6 +37,12 @@ EXPECTED_TOTAL_LEADS = 25_184
 # fiches avec un statut renseigné. Elles suffisent pour l'analyse commerciale
 # R1/R2, signé, déballé pas signé et RDV annulé.
 MINIMUM_ACCEPTABLE_LEADS = 17_000
+REQUIRED_STATUS_GROUPS = {
+    "R1/R2": lambda value: bool(re.match(r"^R[12](?:\b| )", value)),
+    "SIGNÉ": lambda value: value.startswith("SIGNE"),
+    "DÉBALLÉ PAS SIGNÉ": lambda value: value.startswith("DEBALLE PAS SIGNE"),
+    "RDV ANNULÉ": lambda value: value.startswith("RDV ANNULE"),
+}
 
 
 def wait_for_pagination_total(page, timeout_seconds: int = 20) -> tuple[str, int]:
@@ -193,15 +199,46 @@ def print_filter_diagnostic(page) -> None:
 
 
 def row_status_any(row) -> str | None:
+    # `statusAt` contient la date du statut et son nom CSS contient lui aussi
+    # « status ». Il ne doit jamais être confondu avec la colonne Statut.
     cells = row.locator(
-        "td.mat-column-status, td[class*='mat-column-status'], "
-        "[role='gridcell'][class*='status']"
+        "td.mat-column-status, "
+        "td[class~='mat-column-status'], "
+        "[role='gridcell'][class~='mat-column-status']"
     )
     for index in range(cells.count()):
         value = clean(cells.nth(index).inner_text())
         if value:
             return value
     return None
+
+
+def validate_business_statuses() -> None:
+    """Refuse un faux succès lorsque le CRM a livré un tunnel incomplet."""
+    with sqlite3.connect(DB_PATH) as connection:
+        rows = connection.execute(
+            "SELECT COALESCE(statut, ''), COUNT(*) FROM lead_funnel GROUP BY statut"
+        ).fetchall()
+
+    normalized_counts: dict[str, int] = {}
+    for raw_status, count in rows:
+        status = normalize(raw_status)
+        normalized_counts[status] = normalized_counts.get(status, 0) + int(count)
+
+    print("Répartition des statuts du tunnel :")
+    for status, count in sorted(normalized_counts.items(), key=lambda item: (-item[1], item[0])):
+        print(f"  {status or '(VIDE)'}: {count}")
+
+    group_counts = {
+        label: sum(count for status, count in normalized_counts.items() if matcher(status))
+        for label, matcher in REQUIRED_STATUS_GROUPS.items()
+    }
+    print("Contrôle métier : " + " | ".join(f"{label}={count}" for label, count in group_counts.items()))
+    missing = [label for label, count in group_counts.items() if count == 0]
+    if missing:
+        raise RuntimeError(
+            "Synchronisation refusée : statuts métier absents : " + ", ".join(missing)
+        )
 
 
 def extract_rows(page, synced_at: str) -> list[tuple]:
@@ -327,6 +364,7 @@ def main() -> None:
         raise RuntimeError(
             "Synchronisation refusée : aucune fiche enregistrée."
         )
+    validate_business_statuses()
     print(f"Tunnel commercial synchronisé : {saved_total} fiches uniques.")
 
 
