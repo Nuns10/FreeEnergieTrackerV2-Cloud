@@ -741,6 +741,89 @@ else:
     )
     st.caption("Le commercial correspond à l'intervenant actuellement attribué dans le CRM.")
 
+    st.markdown("**Analyse mensuelle par vendeur**")
+    available_months = sorted(
+        value for value in vendor_base["Mois d'attribution"].dropna().unique()
+        if value and value != "NaT"
+    )
+    default_months = available_months[-6:]
+    selected_months = st.multiselect(
+        "Mois d'attribution à comparer",
+        available_months,
+        default=default_months,
+        key="monthly_vendor_months",
+    )
+    monthly_base = vendor_base[
+        vendor_base["Mois d'attribution"].isin(selected_months)
+    ].copy()
+    monthly_vendor = monthly_base.groupby(
+        ["Mois d'attribution", "_owner"], observed=True
+    ).agg(
+        **{
+            "Leads reçus": ("crm_id", "nunique"),
+            "RDV positionnés": ("RDV positionné", "sum"),
+            "Signatures": ("Signé", "sum"),
+        }
+    ).reset_index().rename(columns={"_owner": "Commercial"})
+    if monthly_vendor.empty:
+        st.info("Sélectionnez au moins un mois pour afficher l'analyse vendeurs.")
+    else:
+        monthly_vendor["Taux RDV"] = (
+            100 * monthly_vendor["RDV positionnés"] / monthly_vendor["Leads reçus"]
+        ).round(1)
+        monthly_vendor["Signature / RDV"] = (
+            100 * monthly_vendor["Signatures"]
+            / monthly_vendor["RDV positionnés"].replace(0, pd.NA)
+        ).fillna(0).round(1)
+        monthly_vendor = monthly_vendor.sort_values(
+            ["Mois d'attribution", "Taux RDV", "Signature / RDV"],
+            ascending=[False, False, False],
+        )
+        st.dataframe(
+            monthly_vendor,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Taux RDV": st.column_config.ProgressColumn(
+                    "Taux RDV", format="%.1f%%", min_value=0, max_value=100
+                ),
+                "Signature / RDV": st.column_config.ProgressColumn(
+                    "Signature / RDV", format="%.1f%%", min_value=0, max_value=100
+                ),
+            },
+        )
+
+        chart_metric = st.radio(
+            "Indicateur du graphique",
+            ["Taux RDV", "Signature / RDV", "Leads reçus"],
+            horizontal=True,
+            key="monthly_vendor_metric",
+        )
+        monthly_chart = px.line(
+            monthly_vendor.sort_values("Mois d'attribution"),
+            x="Mois d'attribution",
+            y=chart_metric,
+            color="Commercial",
+            markers=True,
+        )
+        monthly_chart.update_layout(
+            title=f"{chart_metric} · évolution mensuelle par vendeur",
+            height=430,
+            margin=dict(l=15, r=15, t=55, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis_title=None,
+            yaxis_title="%" if "Taux" in chart_metric or "Signature" in chart_metric else None,
+            font_family="DM Sans",
+            legend_title=None,
+        )
+        monthly_chart.update_yaxes(gridcolor="#edf0f4", rangemode="tozero")
+        st.plotly_chart(monthly_chart, use_container_width=True)
+        st.caption(
+            "Le mois correspond au mois de réception du lead. Les RDV et signatures "
+            "sont rattachés à cette cohorte, même s'ils ont été obtenus plus tard."
+        )
+
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
 compare["NRP / jour"] = (compare["Appels"] / max(len(business_days), 1)).round(1)
