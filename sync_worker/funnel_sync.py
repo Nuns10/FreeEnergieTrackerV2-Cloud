@@ -29,6 +29,8 @@ from crm_sync import (
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "leads.sqlite"
+EXPECTED_TOTAL_LEADS = 25_184
+MINIMUM_ACCEPTABLE_LEADS = 25_000
 
 
 def ensure_table() -> None:
@@ -115,10 +117,13 @@ def select_all_statuses(page) -> None:
     print(f"Tous les statuts sont sélectionnés. Pagination : {pagination}")
     match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
     total = int(match.group(1).replace(" ", "")) if match else 0
-    if total and total < 16_000:
+    if total and total < MINIMUM_ACCEPTABLE_LEADS:
         raise RuntimeError(
-            f"Tous les statuts ne sont pas actifs ({total} leads seulement)."
+            f"Tunnel incomplet : {total} leads visibles au lieu des "
+            f"{EXPECTED_TOTAL_LEADS} attendus."
         )
+    if total:
+        print(f"Contrôle du tunnel : {total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
 
 
 def row_status_any(row) -> str | None:
@@ -240,8 +245,14 @@ def main() -> None:
     # Une suppression n'est faite qu'après un parcours complet réussi.
     with sqlite3.connect(DB_PATH) as connection:
         connection.execute("DELETE FROM lead_funnel WHERE synced_at <> ?", (synced_at,))
+        saved_total = connection.execute("SELECT COUNT(*) FROM lead_funnel").fetchone()[0]
         connection.commit()
-    print(f"Tunnel commercial synchronisé : {total} leads.")
+    if saved_total < MINIMUM_ACCEPTABLE_LEADS:
+        raise RuntimeError(
+            f"Synchronisation refusée : {saved_total} leads enregistrés au lieu des "
+            f"{EXPECTED_TOTAL_LEADS} attendus."
+        )
+    print(f"Tunnel commercial synchronisé : {saved_total}/{EXPECTED_TOTAL_LEADS} leads.")
 
 
 if __name__ == "__main__":
