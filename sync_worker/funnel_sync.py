@@ -120,13 +120,25 @@ def clear_status_filter(page) -> None:
     )
     options.first.wait_for(state="attached", timeout=15_000)
     removed = []
+    empty_options = []
     for index in range(options.count()):
         option = options.nth(index)
         label = normalize(option.text_content())
-        if label and option_is_selected(option):
+        if not label:
+            empty_options.append(option)
+            continue
+        if option_is_selected(option):
             option.click(force=True)
             removed.append(label)
             page.wait_for_timeout(250)
+
+    # Le premier choix sans libellé est la case générale du composant CRM.
+    # Après avoir retiré les anciennes valeurs, elle remet réellement le
+    # filtre sur « Tous », y compris les leads dont le statut est vide.
+    if empty_options:
+        empty_options[0].click(force=True)
+        removed.append("TOUS / SANS STATUT")
+        page.wait_for_timeout(1000)
     page.keyboard.press("Escape")
     page.wait_for_timeout(4000)
     wait_for_rows(page)
