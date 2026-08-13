@@ -144,18 +144,12 @@ def clear_status_filter(page) -> None:
             removed.append(label)
             page.wait_for_timeout(250)
 
-    # Le premier choix sans libellé est la case générale du composant CRM.
-    # Après avoir retiré les anciennes valeurs, elle remet réellement le
-    # filtre sur « Tous », y compris les leads dont le statut est vide.
+    # Une fois chaque valeur cochée retirée, la sélection est vide et le CRM
+    # revient naturellement sur la vue sans filtre (25 184). Ne pas cliquer
+    # sur la case générale : elle sélectionne les 17 159 statuts renseignés et
+    # exclut précisément les fiches au statut vide.
     if empty_options:
-        empty_options[0].click(force=True)
-        page.wait_for_timeout(500)
-        # Premier clic = sélection de tous les statuts nommés (17 159).
-        # Second clic = aucune sélection, donc véritable vue non filtrée,
-        # incluant aussi les fiches dont le statut est vide (25 184).
-        empty_options[0].click(force=True)
-        removed.append("FILTRE ENTIEREMENT VIDE")
-        page.wait_for_timeout(1200)
+        removed.append("VALEURS SELECTIONNEES RETIREES")
     page.keyboard.press("Escape")
     page.wait_for_timeout(4000)
     wait_for_rows(page)
