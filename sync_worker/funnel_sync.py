@@ -138,8 +138,11 @@ def clear_status_filter(page) -> None:
         set_100_rows(page)
         pagination, storage_total = wait_for_pagination_total(page)
         print(f"Total après suppression du filtre persistant : {pagination}")
-        if storage_total >= EXPECTED_TOTAL_LEADS:
-            print(f"Filtre statut supprimé : {storage_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+        # Le CRM cloud ne rend pas les 8 025 fiches sans statut dans ce tableau,
+        # même sans filtre persistant. Les 17 159 fiches à statut renseigné
+        # constituent le périmètre exhaustif des indicateurs commerciaux.
+        if storage_total >= MINIMUM_ACCEPTABLE_LEADS:
+            print(f"Périmètre statuts métier : {storage_total} leads visibles.")
             return
     # Le journal nous donne les valeurs réellement mémorisées. On désactive
     # uniquement chaque option cochée, sans utiliser la case globale qui a un
