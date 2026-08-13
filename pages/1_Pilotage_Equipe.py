@@ -597,60 +597,111 @@ else:
     funnel["_owner"] = funnel.get("intervenant", "Non attribué").map(clean).replace("", "Non attribué")
     funnel["Mois d'attribution"] = funnel["_created"].dt.to_period("M").astype(str)
 
-    # L'historique quotidien permet de conserver un R1/R2 même si le lead
-    # change ensuite de statut. Au premier relevé, le statut courant complète
-    # l'information ; la précision historique augmentera chaque nuit.
-    current_rdv = funnel["_status"].str.match(r"^R[12](?:\b| )", na=False)
+    # Un statut aval prouve qu'un rendez-vous a bien été pris, même si le lead
+    # n'est plus affiché R1 dans le CRM (R2, annulé, déballé ou signé).
+    def appointment_reached(statuses: pd.Series) -> pd.Series:
+        values = statuses.fillna("").map(norm)
+        return (
+            values.str.match(r"^R[12](?:\b| )", na=False)
+            | values.str.contains(r"^RDV ANNULE", regex=True, na=False)
+            | values.str.contains(r"^DEBALLE PAS SIGNE", regex=True, na=False)
+            | values.str.match(r"^SIGNE(?:\b| )", na=False)
+        )
+
+    current_rdv = appointment_reached(funnel["_status"])
+    current_r1 = funnel["_status"].str.match(r"^R1(?:\b| )", na=False)
+    current_r2 = funnel["_status"].str.match(r"^R2(?:\b| )", na=False)
+    current_cancelled = funnel["_status"].str.contains(r"^RDV ANNULE", regex=True, na=False)
+    current_not_signed = funnel["_status"].str.contains(r"^DEBALLE PAS SIGNE", regex=True, na=False)
+    current_signed = funnel["_status"].str.match(r"^SIGNE(?:\b| )", na=False)
+
     ever_rdv_ids: set[str] = set()
+    ever_signed_ids: set[str] = set()
+    first_rdv_at: dict[str, pd.Timestamp] = {}
     if not raw_status_history.empty and "statut" in raw_status_history:
-        hist_status = raw_status_history["statut"].map(norm)
+        history = raw_status_history.copy()
+        hist_status = history["statut"].map(norm)
         ever_rdv_ids = set(
-            raw_status_history.loc[
-                hist_status.str.match(r"^R[12](?:\b| )", na=False), "crm_id"
+            history.loc[
+                appointment_reached(hist_status), "crm_id"
             ].astype(str)
         )
+        ever_signed_ids = set(
+            history.loc[hist_status.str.match(r"^SIGNE(?:\b| )", na=False), "crm_id"].astype(str)
+        )
+        history["_status_at"] = pd.to_datetime(history.get("date_statut"), dayfirst=True, errors="coerce")
+        dated_rdv = history[
+            hist_status.str.match(r"^R[12](?:\b| )", na=False) & history["_status_at"].notna()
+        ]
+        if not dated_rdv.empty:
+            first_rdv_at = dated_rdv.groupby(dated_rdv["crm_id"].astype(str))["_status_at"].min().to_dict()
+
     funnel["RDV positionné"] = current_rdv | funnel["crm_id"].astype(str).isin(ever_rdv_ids)
+    funnel["Signé"] = current_signed | funnel["crm_id"].astype(str).isin(ever_signed_ids)
+    funnel["R1 actuel"] = current_r1
+    funnel["R2 actuel"] = current_r2
+    funnel["RDV annulé"] = current_cancelled
+    funnel["Déballé non signé"] = current_not_signed
+    funnel["_rdv_at"] = funnel["crm_id"].astype(str).map(first_rdv_at)
+    funnel["_rdv_at"] = funnel["_rdv_at"].fillna(funnel["_status_at"].where(current_r1 | current_r2))
     funnel["Délai de traitement (h)"] = (
-        (funnel["_status_at"] - funnel["_created"]).dt.total_seconds() / 3600
-    ).where(funnel["RDV positionné"])
+        (funnel["_rdv_at"] - funnel["_created"]).dt.total_seconds() / 3600
+    ).where(funnel["_rdv_at"].notna())
 
     valid = funnel[funnel["_created"].notna()].copy()
     converted = int(valid["RDV positionné"].sum())
+    signed = int(valid["Signé"].sum())
     rate = converted / len(valid) * 100 if len(valid) else 0
+    signed_rate = signed / converted * 100 if converted else 0
     delay = valid.loc[valid["RDV positionné"], "Délai de traitement (h)"].dropna()
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Leads analysés", f"{len(valid):,}".replace(",", " "))
-    k2.metric("Passés en R1/R2", converted)
+    k2.metric("Ayant atteint un RDV", converted)
     k3.metric("Taux de prise de RDV", f"{rate:.1f}%")
-    k4.metric("Délai médian vers RDV", f"{delay.median():.0f} h" if not delay.empty else "—")
+    k4.metric("Signés", signed)
+    k5.metric("Signature après RDV", f"{signed_rate:.1f}%")
+    st.caption(
+        "Un RDV atteint inclut R1, R2, RDV annulé, Déballé pas signé et Signé. "
+        + (f"Délai médian observé vers R1/R2 : {delay.median():.0f} h." if not delay.empty else "Le délai vers R1/R2 sera enrichi par l'historique quotidien.")
+    )
 
     source_stats = valid.groupby("_source").agg(
         Leads=("crm_id", "nunique"),
         RDV=("RDV positionné", "sum"),
+        **{"Signés": ("Signé", "sum")},
         **{"Délai médian (h)": ("Délai de traitement (h)", "median")},
     ).reset_index().rename(columns={"_source": "Source"})
     source_stats["Transformation"] = (100 * source_stats["RDV"] / source_stats["Leads"]).round(1)
+    source_stats["Signature / RDV"] = (100 * source_stats["Signés"] / source_stats["RDV"].replace(0, pd.NA)).fillna(0).round(1)
     source_stats = source_stats.sort_values(["Leads", "Transformation"], ascending=False)
 
     month_stats = valid.groupby("Mois d'attribution").agg(
-        Leads=("crm_id", "nunique"), RDV=("RDV positionné", "sum")
+        Leads=("crm_id", "nunique"), RDV=("RDV positionné", "sum"), Signés=("Signé", "sum")
     ).reset_index()
     month_stats["Transformation"] = (100 * month_stats["RDV"] / month_stats["Leads"]).round(1)
+    month_stats["Signature"] = (100 * month_stats["Signés"] / month_stats["Leads"]).round(1)
 
     fleft, fright = st.columns([1.15, 1])
     with fleft:
         st.markdown("**Performance par source**")
         st.dataframe(
             source_stats.head(25), use_container_width=True, hide_index=True,
-            column_config={"Transformation": st.column_config.ProgressColumn("Taux RDV", format="%.1f%%", min_value=0, max_value=100)},
+            column_config={
+                "Transformation": st.column_config.ProgressColumn("Taux RDV", format="%.1f%%", min_value=0, max_value=100),
+                "Signature / RDV": st.column_config.ProgressColumn("Signature / RDV", format="%.1f%%", min_value=0, max_value=100),
+            },
         )
     with fright:
+        month_long = month_stats.tail(12).melt(
+            id_vars="Mois d'attribution", value_vars=["Transformation", "Signature"],
+            var_name="Étape", value_name="Taux",
+        )
         fig_month = px.bar(
-            month_stats.tail(12), x="Mois d'attribution", y="Transformation",
-            text="Transformation", color_discrete_sequence=[ACCENT],
+            month_long, x="Mois d'attribution", y="Taux", color="Étape", barmode="group",
+            text="Taux", color_discrete_map={"Transformation": ACCENT, "Signature": "#20a464"},
         )
         fig_month.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-        fig_month.update_layout(title="Taux de RDV par mois d'attribution", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title="%", font_family="DM Sans")
+        fig_month.update_layout(title="Transformation par mois d'attribution", height=390, margin=dict(l=15, r=15, t=55, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title=None, yaxis_title="% des leads", font_family="DM Sans", legend_title=None)
         fig_month.update_yaxes(gridcolor="#edf0f4", rangemode="tozero")
         st.plotly_chart(fig_month, use_container_width=True)
 
@@ -659,6 +710,36 @@ else:
     with st.expander("Comprendre les leads sans rendez-vous"):
         st.dataframe(lost.head(30), use_container_width=True, hide_index=True)
         st.caption("Cette répartition inclut notamment Pas de demande, Projet abandonné, À relancer et les autres statuts du CRM.")
+
+    st.markdown("**Transformation par commercial**")
+    vendor_base = valid[
+        (valid["_owner"] != "Non attribué")
+        & ~valid["_owner"].map(norm).isin(EXCLUDED)
+    ].copy()
+    vendor_stats = vendor_base.groupby("_owner").agg(
+        Leads=("crm_id", "nunique"),
+        **{
+            "RDV atteints": ("RDV positionné", "sum"),
+            "R1 actuels": ("R1 actuel", "sum"),
+            "R2 actuels": ("R2 actuel", "sum"),
+            "Annulés": ("RDV annulé", "sum"),
+            "Déballés non signés": ("Déballé non signé", "sum"),
+            "Signés": ("Signé", "sum"),
+        },
+    ).reset_index().rename(columns={"_owner": "Commercial"})
+    vendor_stats["Taux RDV"] = (100 * vendor_stats["RDV atteints"] / vendor_stats["Leads"]).round(1)
+    vendor_stats["Signature / RDV"] = (
+        100 * vendor_stats["Signés"] / vendor_stats["RDV atteints"].replace(0, pd.NA)
+    ).fillna(0).round(1)
+    vendor_stats = vendor_stats.sort_values(["Taux RDV", "Signature / RDV"], ascending=False)
+    st.dataframe(
+        vendor_stats, use_container_width=True, hide_index=True,
+        column_config={
+            "Taux RDV": st.column_config.ProgressColumn("Taux RDV", format="%.1f%%", min_value=0, max_value=100),
+            "Signature / RDV": st.column_config.ProgressColumn("Signature / RDV", format="%.1f%%", min_value=0, max_value=100),
+        },
+    )
+    st.caption("Le commercial correspond à l'intervenant actuellement attribué dans le CRM.")
 
 st.markdown('<div class="section-title"><span></span>Vue comparative de l’équipe</div>', unsafe_allow_html=True)
 compare = team.copy()
