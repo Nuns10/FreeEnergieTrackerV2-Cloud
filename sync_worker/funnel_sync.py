@@ -124,41 +124,43 @@ def clear_status_filter(page) -> None:
     # Le journal nous donne les valeurs réellement mémorisées. On désactive
     # uniquement chaque option cochée, sans utiliser la case globale qui a un
     # comportement ambigu dans ce composant Angular.
-    select.first.click(force=True)
-    page.wait_for_timeout(700)
-    options = page.locator(
-        ".cdk-overlay-pane mat-option[role='option'], "
-        ".cdk-overlay-pane [role='option']"
-    )
-    options.first.wait_for(state="attached", timeout=15_000)
     removed = []
-    empty_options = []
-    for index in range(options.count()):
-        option = options.nth(index)
-        label = normalize(option.text_content())
-        if not label:
-            empty_options.append(option)
-            continue
-        if option_is_selected(option):
-            option.click(force=True)
-            removed.append(label)
-            page.wait_for_timeout(250)
-
-    # Une fois chaque valeur cochée retirée, la sélection est vide et le CRM
-    # revient naturellement sur la vue sans filtre (25 184). Ne pas cliquer
-    # sur la case générale : elle sélectionne les 17 159 statuts renseignés et
-    # exclut précisément les fiches au statut vide.
-    if empty_options:
-        removed.append("VALEURS SELECTIONNEES RETIREES")
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(4000)
-    wait_for_rows(page)
-    pagination, last_total = wait_for_pagination_total(page)
+    # Le composant a trois états. Quand les deux valeurs mémorisées sont
+    # retirées, il peut basculer automatiquement sur « tous les statuts
+    # renseignés » (17 159). On rouvre alors le panneau et retire les 17
+    # valeurs sélectionnées. La vue suivante inclut enfin les statuts vides.
+    for pass_number in range(3):
+        select.first.click(force=True)
+        page.wait_for_timeout(700)
+        options = page.locator(
+            ".cdk-overlay-pane mat-option[role='option'], "
+            ".cdk-overlay-pane [role='option']"
+        )
+        options.first.wait_for(state="attached", timeout=15_000)
+        selected_labels = []
+        for index in range(options.count()):
+            option = options.nth(index)
+            label = normalize(option.text_content())
+            if label and option_is_selected(option):
+                selected_labels.append(label)
+        for label in selected_labels:
+            option = options.filter(has_text=label).first
+            if option.count() and option_is_selected(option):
+                option.click(force=True)
+                removed.append(label)
+                page.wait_for_timeout(180)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(4000)
+        wait_for_rows(page)
+        pagination, last_total = wait_for_pagination_total(page)
+        print(f"Total après retrait passe {pass_number + 1} : {pagination}")
+        if last_total >= EXPECTED_TOTAL_LEADS:
+            print("Statuts décochés : " + (" | ".join(removed) or "aucun"))
+            print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+            return
+        if not selected_labels:
+            break
     print("Statuts décochés : " + (" | ".join(removed) or "aucun"))
-    print(f"Total après retrait précis : {pagination}")
-    if last_total >= EXPECTED_TOTAL_LEADS:
-        print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
-        return
     raise RuntimeError(
         f"Tunnel incomplet : {last_total} leads visibles au lieu des "
         f"{EXPECTED_TOTAL_LEADS} attendus."
