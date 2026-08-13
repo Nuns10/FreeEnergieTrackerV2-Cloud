@@ -120,6 +120,27 @@ def clear_status_filter(page) -> None:
     )
 
 
+def print_filter_diagnostic(page) -> None:
+    """Journal non sensible des filtres actifs pour fiabiliser le robot cloud."""
+    selects = page.locator("thead mat-select")
+    visible_selects = []
+    for index in range(selects.count()):
+        item = selects.nth(index)
+        visible_selects.append(
+            f"{item.get_attribute('placeholder') or item.get_attribute('aria-label')}:"
+            f"{clean(item.inner_text())}"
+        )
+    inputs = page.locator("thead input")
+    filled_inputs = []
+    for index in range(inputs.count()):
+        item = inputs.nth(index)
+        value = clean(item.input_value())
+        if value:
+            filled_inputs.append(f"{item.get_attribute('placeholder')}:{value}")
+    print("Filtres select visibles : " + " | ".join(visible_selects))
+    print("Filtres texte remplis : " + (" | ".join(filled_inputs) or "aucun"))
+
+
 def row_status_any(row) -> str | None:
     cells = row.locator(
         "td.mat-column-status, td[class*='mat-column-status'], "
@@ -228,6 +249,7 @@ def main() -> None:
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
+        print_filter_diagnostic(page)
         clear_status_filter(page)
         page_number = 1
         while True:
