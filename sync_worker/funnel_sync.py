@@ -78,22 +78,17 @@ def ensure_table() -> None:
         connection.commit()
 
 
-def select_all_statuses(page) -> None:
-    """Sélectionne tous les statuts afin d'afficher tout le tunnel.
-
-    Dans ce CRM, retirer toutes les coches réactive le filtre mémorisé. La
-    méthode fiable consiste donc à cocher explicitement chaque statut.
-    """
+def clear_status_filter(page) -> None:
+    """Retire réellement le filtre statut, y compris les statuts vides."""
     select = status_filter_select(page)
     if select.count() == 0:
         raise RuntimeError("Filtre Statut introuvable dans le CRM.")
 
     select.first.click(force=True)
     page.wait_for_timeout(500)
-    # Le menu utilise une liste virtualisée : seules quelques options sont
-    # présentes dans le DOM. Cliquer chacune d'elles donnait donc un faux
-    # « tous les statuts » et omettait notamment SIGNÉ / DÉBALLÉ PAS SIGNÉ.
-    # Le premier contrôle de recherche fournit la vraie case « tout cocher ».
+    # « Tous cochés » n'est pas équivalent à « aucun filtre » : les leads sans
+    # statut disparaissent. On utilise la case globale en deux temps si besoin
+    # (tout cocher, puis tout décocher), ce qui remet le champ sur « Status ».
     toggle_all = page.locator(
         ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
         ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
@@ -109,12 +104,14 @@ def select_all_statuses(page) -> None:
     checked = aria_checked == "true" or "mat-checkbox-checked" in classes
     if not checked:
         toggle_all.click(force=True)
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(700)
+    toggle_all.click(force=True)
+    page.wait_for_timeout(900)
     page.keyboard.press("Escape")
     page.wait_for_timeout(3500)
     wait_for_rows(page)
     pagination = paginator_text(page)
-    print(f"Tous les statuts sont sélectionnés. Pagination : {pagination}")
+    print(f"Filtre statut supprimé. Pagination : {pagination}")
     match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
     total = int(match.group(1).replace(" ", "")) if match else 0
     if total and total < MINIMUM_ACCEPTABLE_LEADS:
@@ -208,13 +205,19 @@ def next_page(page) -> bool:
     if "mat-button-disabled" in (button.get_attribute("class") or ""):
         return False
     before = paginator_text(page)
-    button.click(force=True)
-    for _ in range(40):
-        page.wait_for_timeout(250)
-        after = paginator_text(page)
-        if after and after != before:
-            wait_for_rows(page)
-            return True
+    first_link = page.locator("tbody tr.mat-row td.mat-column-name a[href^='/lead/']").first
+    before_href = first_link.get_attribute("href") if first_link.count() else None
+    for attempt in range(3):
+        button.click(force=True)
+        for _ in range(80):
+            page.wait_for_timeout(250)
+            after = paginator_text(page)
+            current_link = page.locator("tbody tr.mat-row td.mat-column-name a[href^='/lead/']").first
+            after_href = current_link.get_attribute("href") if current_link.count() else None
+            if (after and after != before) or (before_href and after_href and after_href != before_href):
+                wait_for_rows(page)
+                return True
+        print(f"Pagination sans réponse, nouvelle tentative {attempt + 2}/3.")
     raise RuntimeError("La page suivante du tunnel CRM n'a pas chargé.")
 
 
@@ -228,7 +231,7 @@ def main() -> None:
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
-        select_all_statuses(page)
+        clear_status_filter(page)
         page_number = 1
         while True:
             rows = extract_rows(page, synced_at)
