@@ -178,6 +178,15 @@ def print_filter_diagnostic(page) -> None:
             filled_inputs.append(f"{item.get_attribute('placeholder')}:{value}")
     print("Filtres select visibles : " + " | ".join(visible_selects))
     print("Filtres texte remplis : " + (" | ".join(filled_inputs) or "aucun"))
+    # N'affiche que les noms des clés, jamais leur contenu ni les jetons.
+    browser_state_keys = page.evaluate(
+        """() => ({
+            local: Object.keys(localStorage),
+            session: Object.keys(sessionStorage)
+        })"""
+    )
+    print("Clés localStorage : " + " | ".join(browser_state_keys["local"]))
+    print("Clés sessionStorage : " + " | ".join(browser_state_keys["session"]))
 
 
 def row_status_any(row) -> str | None:
