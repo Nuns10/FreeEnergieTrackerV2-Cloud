@@ -16,11 +16,9 @@ from cloud_browser import launch_context
 from crm_sync import (
     LIST_URL,
     PROFILE_DIR,
-    TARGET_STATUSES,
     cell_text,
     clean,
     normalize,
-    option_is_selected,
     open_list,
     paginator_text,
     set_100_rows,
@@ -90,17 +88,26 @@ def select_all_statuses(page) -> None:
 
     select.first.click(force=True)
     page.wait_for_timeout(500)
-    options = page.locator(
-        ".cdk-overlay-pane mat-option[role='option'], "
-        ".cdk-overlay-pane [role='option']"
-    )
-    options.first.wait_for(state="attached", timeout=15_000)
-    for index in range(options.count()):
-        option = options.nth(index)
-        label = normalize(option.text_content())
-        if label and not option_is_selected(option):
-            option.click(force=True)
-            page.wait_for_timeout(100)
+    # Le menu utilise une liste virtualisée : seules quelques options sont
+    # présentes dans le DOM. Cliquer chacune d'elles donnait donc un faux
+    # « tous les statuts » et omettait notamment SIGNÉ / DÉBALLÉ PAS SIGNÉ.
+    # Le premier contrôle de recherche fournit la vraie case « tout cocher ».
+    toggle_all = page.locator(
+        ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
+        ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
+        ".cdk-overlay-pane mat-checkbox[aria-label*='Select all'], "
+        ".cdk-overlay-pane mat-checkbox[aria-label*='Tout']"
+    ).first
+    if toggle_all.count() == 0:
+        page.keyboard.press("Escape")
+        raise RuntimeError("Case 'tous les statuts' introuvable dans le filtre CRM.")
+
+    classes = toggle_all.get_attribute("class") or ""
+    aria_checked = toggle_all.get_attribute("aria-checked")
+    checked = aria_checked == "true" or "mat-checkbox-checked" in classes
+    if not checked:
+        toggle_all.click(force=True)
+        page.wait_for_timeout(1200)
     page.keyboard.press("Escape")
     page.wait_for_timeout(3500)
     wait_for_rows(page)
@@ -108,7 +115,7 @@ def select_all_statuses(page) -> None:
     print(f"Tous les statuts sont sélectionnés. Pagination : {pagination}")
     match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
     total = int(match.group(1).replace(" ", "")) if match else 0
-    if total and total < 5_000:
+    if total and total < 16_000:
         raise RuntimeError(
             f"Tous les statuts ne sont pas actifs ({total} leads seulement)."
         )
