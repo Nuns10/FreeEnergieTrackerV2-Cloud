@@ -7,6 +7,8 @@ tableau complet et mémorise les colonnes utiles au pilotage de la conversion.
 """
 
 import sqlite3
+import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from crm_sync import (
     clean,
     normalize,
     open_list,
+    option_is_selected,
     paginator_text,
     set_100_rows,
     status_filter_select,
@@ -31,6 +34,20 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "leads.sqlite"
 EXPECTED_TOTAL_LEADS = 25_184
 MINIMUM_ACCEPTABLE_LEADS = 25_000
+
+
+def wait_for_pagination_total(page, timeout_seconds: int = 20) -> tuple[str, int]:
+    """Attend le vrai total : le CRM affiche brièvement « 0 de 0 » au chargement."""
+    deadline = time.monotonic() + timeout_seconds
+    last_text = ""
+    while time.monotonic() < deadline:
+        last_text = paginator_text(page)
+        match = re.search(r"de\s+([\d\s]+)$", last_text)
+        total = int(match.group(1).replace(" ", "")) if match else 0
+        if total > 0:
+            return last_text, total
+        page.wait_for_timeout(500)
+    return last_text, 0
 
 
 def ensure_table() -> None:
@@ -87,9 +104,7 @@ def clear_status_filter(page) -> None:
     # Le cas normal est déjà le bon : le profil cloud ouvre parfois la liste
     # sans filtre. Ne surtout pas cliquer dans ce cas, car le clic global
     # créerait lui-même une sélection partielle.
-    pagination = paginator_text(page)
-    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
-    initial_total = int(match.group(1).replace(" ", "")) if match else 0
+    pagination, initial_total = wait_for_pagination_total(page)
     print(f"Total avant manipulation du filtre : {pagination}")
     if initial_total >= MINIMUM_ACCEPTABLE_LEADS:
         print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
@@ -115,9 +130,7 @@ def clear_status_filter(page) -> None:
     page.keyboard.press("Escape")
     page.wait_for_timeout(4000)
     wait_for_rows(page)
-    pagination = paginator_text(page)
-    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
-    last_total = int(match.group(1).replace(" ", "")) if match else 0
+    pagination, last_total = wait_for_pagination_total(page)
     print("Statuts décochés : " + (" | ".join(removed) or "aucun"))
     print(f"Total après retrait précis : {pagination}")
     if last_total >= MINIMUM_ACCEPTABLE_LEADS:
@@ -139,7 +152,7 @@ def print_filter_diagnostic(page) -> None:
             f"{item.get_attribute('placeholder') or item.get_attribute('aria-label')}:"
             f"{clean(item.inner_text())}"
         )
-    inputs = page.locator("thead input")
+    inputs = page.locator("thead input:not([type='checkbox']):not([type='radio'])")
     filled_inputs = []
     for index in range(inputs.count()):
         item = inputs.nth(index)
