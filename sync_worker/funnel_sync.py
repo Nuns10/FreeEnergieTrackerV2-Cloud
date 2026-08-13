@@ -115,7 +115,10 @@ def clear_status_filter(page) -> None:
     # créerait lui-même une sélection partielle.
     pagination, initial_total = wait_for_pagination_total(page)
     print(f"Total avant manipulation du filtre : {pagination}")
-    if initial_total >= MINIMUM_ACCEPTABLE_LEADS:
+    # 17 159 correspond à « tous les statuts actuellement sélectionnés », pas
+    # à l'ensemble du CRM. Seul le total non filtré de 25 184 autorise un
+    # retour immédiat ; sinon il faut réellement vider le filtre.
+    if initial_total >= EXPECTED_TOTAL_LEADS:
         print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
         return
     # Le journal nous donne les valeurs réellement mémorisées. On désactive
@@ -159,7 +162,7 @@ def clear_status_filter(page) -> None:
     pagination, last_total = wait_for_pagination_total(page)
     print("Statuts décochés : " + (" | ".join(removed) or "aucun"))
     print(f"Total après retrait précis : {pagination}")
-    if last_total >= MINIMUM_ACCEPTABLE_LEADS:
+    if last_total >= EXPECTED_TOTAL_LEADS:
         print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
         return
     raise RuntimeError(
