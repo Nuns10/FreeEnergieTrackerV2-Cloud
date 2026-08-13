@@ -89,12 +89,13 @@ def clear_status_filter(page) -> None:
     # « Tous cochés » n'est pas équivalent à « aucun filtre » : les leads sans
     # statut disparaissent. On utilise la case globale en deux temps si besoin
     # (tout cocher, puis tout décocher), ce qui remet le champ sur « Status ».
-    toggle_all = page.locator(
+    toggle_selector = (
         ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
         ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
         ".cdk-overlay-pane mat-checkbox[aria-label*='Select all'], "
         ".cdk-overlay-pane mat-checkbox[aria-label*='Tout']"
-    ).first
+    )
+    toggle_all = page.locator(toggle_selector).first
     if toggle_all.count() == 0:
         page.keyboard.press("Escape")
         raise RuntimeError("Case 'tous les statuts' introuvable dans le filtre CRM.")
@@ -104,9 +105,12 @@ def clear_status_filter(page) -> None:
     checked = aria_checked == "true" or "mat-checkbox-checked" in classes
     if not checked:
         toggle_all.click(force=True)
-        page.wait_for_timeout(700)
+        page.wait_for_timeout(1000)
+        # Angular recrée le composant après le clic : reprendre un locator frais.
+        toggle_all = page.locator(toggle_selector).first
+        toggle_all.wait_for(state="attached", timeout=10_000)
     toggle_all.click(force=True)
-    page.wait_for_timeout(900)
+    page.wait_for_timeout(1500)
     page.keyboard.press("Escape")
     page.wait_for_timeout(3500)
     wait_for_rows(page)
