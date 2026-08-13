@@ -83,6 +83,17 @@ def clear_status_filter(page) -> None:
     select = status_filter_select(page)
     if select.count() == 0:
         raise RuntimeError("Filtre Statut introuvable dans le CRM.")
+
+    # Le cas normal est déjà le bon : le profil cloud ouvre parfois la liste
+    # sans filtre. Ne surtout pas cliquer dans ce cas, car le clic global
+    # créerait lui-même une sélection partielle.
+    pagination = paginator_text(page)
+    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
+    initial_total = int(match.group(1).replace(" ", "")) if match else 0
+    print(f"Total avant manipulation du filtre : {pagination}")
+    if initial_total >= MINIMUM_ACCEPTABLE_LEADS:
+        print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+        return
     toggle_selector = (
         ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
         ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
