@@ -83,48 +83,41 @@ def clear_status_filter(page) -> None:
     select = status_filter_select(page)
     if select.count() == 0:
         raise RuntimeError("Filtre Statut introuvable dans le CRM.")
-
-    select.first.click(force=True)
-    page.wait_for_timeout(500)
-    # « Tous cochés » n'est pas équivalent à « aucun filtre » : les leads sans
-    # statut disparaissent. On utilise la case globale en deux temps si besoin
-    # (tout cocher, puis tout décocher), ce qui remet le champ sur « Status ».
     toggle_selector = (
         ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
         ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
         ".cdk-overlay-pane mat-checkbox[aria-label*='Select all'], "
         ".cdk-overlay-pane mat-checkbox[aria-label*='Tout']"
     )
-    toggle_all = page.locator(toggle_selector).first
-    if toggle_all.count() == 0:
-        page.keyboard.press("Escape")
-        raise RuntimeError("Case 'tous les statuts' introuvable dans le filtre CRM.")
 
-    classes = toggle_all.get_attribute("class") or ""
-    aria_checked = toggle_all.get_attribute("aria-checked")
-    checked = aria_checked == "true" or "mat-checkbox-checked" in classes
-    if not checked:
-        toggle_all.click(force=True)
-        page.wait_for_timeout(1000)
-        # Angular recrée le composant après le clic : reprendre un locator frais.
+    # Selon l'état mémorisé par Angular, un clic peut soit tout sélectionner,
+    # soit tout désélectionner. On mesure donc le résultat après chaque clic et
+    # on s'arrête uniquement sur le total de référence incluant les statuts vides.
+    last_total = 0
+    for attempt in range(3):
+        select.first.click(force=True)
+        page.wait_for_timeout(600)
         toggle_all = page.locator(toggle_selector).first
-        toggle_all.wait_for(state="attached", timeout=10_000)
-    toggle_all.click(force=True)
-    page.wait_for_timeout(1500)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(3500)
-    wait_for_rows(page)
-    pagination = paginator_text(page)
-    print(f"Filtre statut supprimé. Pagination : {pagination}")
-    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
-    total = int(match.group(1).replace(" ", "")) if match else 0
-    if total and total < MINIMUM_ACCEPTABLE_LEADS:
-        raise RuntimeError(
-            f"Tunnel incomplet : {total} leads visibles au lieu des "
-            f"{EXPECTED_TOTAL_LEADS} attendus."
-        )
-    if total:
-        print(f"Contrôle du tunnel : {total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+        if toggle_all.count() == 0:
+            page.keyboard.press("Escape")
+            raise RuntimeError("Case globale du filtre Statut introuvable.")
+        toggle_all.click(force=True)
+        page.wait_for_timeout(900)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(3000)
+        wait_for_rows(page)
+        pagination = paginator_text(page)
+        match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
+        last_total = int(match.group(1).replace(" ", "")) if match else 0
+        print(f"Essai filtre {attempt + 1}: {pagination}")
+        if last_total >= MINIMUM_ACCEPTABLE_LEADS:
+            print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+            return
+
+    raise RuntimeError(
+        f"Tunnel incomplet : {last_total} leads visibles au lieu des "
+        f"{EXPECTED_TOTAL_LEADS} attendus."
+    )
 
 
 def row_status_any(row) -> str | None:
