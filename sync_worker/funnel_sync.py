@@ -94,37 +94,35 @@ def clear_status_filter(page) -> None:
     if initial_total >= MINIMUM_ACCEPTABLE_LEADS:
         print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
         return
-    toggle_selector = (
-        ".cdk-overlay-pane .mat-select-search-toggle-all-checkbox, "
-        ".cdk-overlay-pane ngx-mat-select-search mat-checkbox, "
-        ".cdk-overlay-pane mat-checkbox[aria-label*='Select all'], "
-        ".cdk-overlay-pane mat-checkbox[aria-label*='Tout']"
+    # Le journal nous donne les valeurs réellement mémorisées. On désactive
+    # uniquement chaque option cochée, sans utiliser la case globale qui a un
+    # comportement ambigu dans ce composant Angular.
+    select.first.click(force=True)
+    page.wait_for_timeout(700)
+    options = page.locator(
+        ".cdk-overlay-pane mat-option[role='option'], "
+        ".cdk-overlay-pane [role='option']"
     )
-
-    # Selon l'état mémorisé par Angular, un clic peut soit tout sélectionner,
-    # soit tout désélectionner. On mesure donc le résultat après chaque clic et
-    # on s'arrête uniquement sur le total de référence incluant les statuts vides.
-    last_total = 0
-    for attempt in range(3):
-        select.first.click(force=True)
-        page.wait_for_timeout(600)
-        toggle_all = page.locator(toggle_selector).first
-        if toggle_all.count() == 0:
-            page.keyboard.press("Escape")
-            raise RuntimeError("Case globale du filtre Statut introuvable.")
-        toggle_all.click(force=True)
-        page.wait_for_timeout(900)
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(3000)
-        wait_for_rows(page)
-        pagination = paginator_text(page)
-        match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
-        last_total = int(match.group(1).replace(" ", "")) if match else 0
-        print(f"Essai filtre {attempt + 1}: {pagination}")
-        if last_total >= MINIMUM_ACCEPTABLE_LEADS:
-            print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
-            return
-
+    options.first.wait_for(state="attached", timeout=15_000)
+    removed = []
+    for index in range(options.count()):
+        option = options.nth(index)
+        label = normalize(option.text_content())
+        if label and option_is_selected(option):
+            option.click(force=True)
+            removed.append(label)
+            page.wait_for_timeout(250)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(4000)
+    wait_for_rows(page)
+    pagination = paginator_text(page)
+    match = __import__("re").search(r"de\s+([\d\s]+)$", pagination)
+    last_total = int(match.group(1).replace(" ", "")) if match else 0
+    print("Statuts décochés : " + (" | ".join(removed) or "aucun"))
+    print(f"Total après retrait précis : {pagination}")
+    if last_total >= MINIMUM_ACCEPTABLE_LEADS:
+        print(f"Filtre statut supprimé : {last_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+        return
     raise RuntimeError(
         f"Tunnel incomplet : {last_total} leads visibles au lieu des "
         f"{EXPECTED_TOTAL_LEADS} attendus."
