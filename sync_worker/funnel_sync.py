@@ -33,7 +33,10 @@ from crm_sync import (
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "leads.sqlite"
 EXPECTED_TOTAL_LEADS = 25_184
-MINIMUM_ACCEPTABLE_LEADS = 25_000
+# Mode exploitable validé par la direction : le CRM cloud expose 17 159
+# fiches avec un statut renseigné. Elles suffisent pour l'analyse commerciale
+# R1/R2, signé, déballé pas signé et RDV annulé.
+MINIMUM_ACCEPTABLE_LEADS = 17_000
 
 
 def wait_for_pagination_total(page, timeout_seconds: int = 20) -> tuple[str, int]:
