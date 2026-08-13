@@ -121,6 +121,26 @@ def clear_status_filter(page) -> None:
     if initial_total >= EXPECTED_TOTAL_LEADS:
         print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
         return
+    # Le CRM conserve aussi le filtre complet dans localStorage. L'interface
+    # Angular réapplique sinon automatiquement les 17 statuts renseignés,
+    # même après les avoir décochés visuellement.
+    removed_storage_filter = page.evaluate(
+        """() => {
+            const existed = localStorage.getItem('leadFilter') !== null;
+            localStorage.removeItem('leadFilter');
+            return existed;
+        }"""
+    )
+    if removed_storage_filter:
+        print("Filtre persistant leadFilter supprimé du navigateur.")
+        page.reload(wait_until="domcontentloaded", timeout=90_000)
+        open_list(page)
+        set_100_rows(page)
+        pagination, storage_total = wait_for_pagination_total(page)
+        print(f"Total après suppression du filtre persistant : {pagination}")
+        if storage_total >= EXPECTED_TOTAL_LEADS:
+            print(f"Filtre statut supprimé : {storage_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+            return
     # Le journal nous donne les valeurs réellement mémorisées. On désactive
     # uniquement chaque option cochée, sans utiliser la case globale qui a un
     # comportement ambigu dans ce composant Angular.
