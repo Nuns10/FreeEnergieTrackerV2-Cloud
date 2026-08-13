@@ -137,8 +137,13 @@ def clear_status_filter(page) -> None:
     # filtre sur « Tous », y compris les leads dont le statut est vide.
     if empty_options:
         empty_options[0].click(force=True)
-        removed.append("TOUS / SANS STATUT")
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(500)
+        # Premier clic = sélection de tous les statuts nommés (17 159).
+        # Second clic = aucune sélection, donc véritable vue non filtrée,
+        # incluant aussi les fiches dont le statut est vide (25 184).
+        empty_options[0].click(force=True)
+        removed.append("FILTRE ENTIEREMENT VIDE")
+        page.wait_for_timeout(1200)
     page.keyboard.press("Escape")
     page.wait_for_timeout(4000)
     wait_for_rows(page)
