@@ -679,6 +679,17 @@ def main() -> None:
     with sync_playwright() as playwright:
         context = launch_context(playwright, PROFILE_DIR, {"width": 1490, "height": 995})
         page = context.pages[0] if context.pages else context.new_page()
+        # Diagnostic temporaire de l'appel de liste sous-jacent. Les en-têtes
+        # (et donc le jeton) ne sont jamais journalisés ; seuls le chemin et le
+        # corps de filtre permettent de reproduire le comptage via l'API.
+        def log_business_request(request):
+            if "api.freeenergie.fr" not in request.url or "/selectlists/" in request.url:
+                return
+            path = request.url.split("?", 1)[0]
+            body = (request.post_data or "")[:1500]
+            print(f"REQUETE CRM METIER: {request.method} {path} BODY={body}")
+
+        page.on("request", log_business_request)
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
