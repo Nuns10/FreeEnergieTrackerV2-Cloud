@@ -262,6 +262,36 @@ def print_filter_diagnostic(page) -> None:
         }"""
     )
     print(f"Réponse selectlists/status_lead : {str(status_payload)[:12000]}")
+    other_status_payloads = page.evaluate(
+        """async () => {
+            const raw = localStorage.getItem('_token');
+            let token = raw;
+            try {
+                const parsed = JSON.parse(raw);
+                token = typeof parsed === 'string'
+                    ? parsed
+                    : (parsed.token || parsed.access_token || parsed.accessToken || raw);
+            } catch (_) {}
+            const authorization = token && token.toLowerCase().startsWith('bearer ')
+                ? token : `Bearer ${token}`;
+            const names = [
+                'status_client', 'status_prospect', 'status_customer',
+                'status_deal', 'status_rdv', 'status_appointment'
+            ];
+            const result = {};
+            for (const name of names) {
+                const response = await fetch(
+                    `https://api.freeenergie.fr/v1/selectlists/${name}`,
+                    {headers: {Authorization: authorization}}
+                );
+                if (response.status !== 404) {
+                    result[name] = response.ok ? await response.json() : {http_status: response.status};
+                }
+            }
+            return result;
+        }"""
+    )
+    print(f"Autres listes de statuts : {str(other_status_payloads)[:16000]}")
 
 
 def select_exact_statuses(page, wanted: set[str]) -> None:
