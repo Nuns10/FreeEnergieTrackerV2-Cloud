@@ -236,25 +236,38 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
     )
     options.first.wait_for(state="attached", timeout=15_000)
     found = set()
-    search = page.locator(
-        ".cdk-overlay-pane input[placeholder*='Rechercher' i], "
-        ".cdk-overlay-pane input[aria-label*='Rechercher' i]"
-    ).first
+    def visible_search():
+        return page.locator(
+            ".cdk-overlay-pane input[placeholder*='Rechercher' i]:visible, "
+            ".cdk-overlay-pane input[aria-label*='Rechercher' i]:visible"
+        ).last
+
+    search = visible_search()
 
     # Ce CRM utilise ngx-mat-select-search. La petite case située devant le
     # champ de recherche est un vrai « tout sélectionner ». Deux clics
     # successifs garantissent un départ sans aucune valeur, même lorsque le
     # filtre mémorisé arrive dans l'état intermédiaire (17 159 fiches).
     toggle_all = page.locator(
-        ".cdk-overlay-pane .mat-select-search-inner-row .mat-checkbox, "
-        ".cdk-overlay-pane .mat-select-search-inner-row .mat-pseudo-checkbox, "
-        ".cdk-overlay-pane ngx-mat-select-search .mat-checkbox"
-    ).first
+        ".cdk-overlay-pane .mat-select-search-inner-row .mat-checkbox:visible, "
+        ".cdk-overlay-pane .mat-select-search-inner-row .mat-pseudo-checkbox:visible, "
+        ".cdk-overlay-pane ngx-mat-select-search .mat-checkbox:visible"
+    ).last
     if toggle_all.count():
         toggle_all.click(force=True)
         page.wait_for_timeout(250)
-        toggle_all.click(force=True)
+        # Selon l'état intermédiaire du filtre, ce clic ferme parfois le
+        # panneau. On tente le second uniquement tant qu'il est visible.
+        if toggle_all.is_visible():
+            toggle_all.click(force=True)
         page.wait_for_timeout(350)
+
+    if not search.count() or not search.is_visible():
+        page.keyboard.press("Escape")
+        select.first.click(force=True)
+        page.wait_for_timeout(600)
+        search = visible_search()
+        search.wait_for(state="visible", timeout=15_000)
 
     # La recherche intégrée est beaucoup plus fiable que le défilement du
     # panneau virtualisé : SIGNÉ se trouve hors de la portion initiale du DOM.
