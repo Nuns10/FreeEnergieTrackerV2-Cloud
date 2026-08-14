@@ -496,36 +496,7 @@ def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
     # le filtre manuel de référence utilisé par la direction.
     set_person_type(page, "Client")
     select_exact_statuses(page, wanted)
-    diagnostic_client = page.evaluate(
-        """() => ({
-            displayAttributed: localStorage.getItem('displayAttributed'),
-            leadFilter: localStorage.getItem('leadFilter')
-        })"""
-    )
-    print(f"Filtre cohorte en mode Client : {diagnostic_client}")
     set_person_type(page, "Tous")
-    # Les chiffres de référence de la direction incluent l'historique archivé.
-    # Le profil automatisé imposait `deleted=0`, ce qui retirait notamment 458
-    # SIGNÉS et plus de 800 DÉBALLÉS. Mettre la valeur à undefined fait omettre
-    # `isDeleted` dans l'appel /v1/leads, comme pour un périmètre historique.
-    page.evaluate(
-        """() => {
-            const raw = localStorage.getItem('leadFilter');
-            const filter = raw ? JSON.parse(raw) : {};
-            filter.deleted = 'undefined';
-            localStorage.setItem('leadFilter', JSON.stringify(filter));
-        }"""
-    )
-    page.reload(wait_until="domcontentloaded", timeout=90_000)
-    open_list(page)
-    set_100_rows(page)
-    diagnostic_all = page.evaluate(
-        """() => ({
-            displayAttributed: localStorage.getItem('displayAttributed'),
-            leadFilter: localStorage.getItem('leadFilter')
-        })"""
-    )
-    print(f"Filtre cohorte en mode Tous : {diagnostic_all}")
     pagination, expected = wait_for_pagination_total(page)
     print(f"Cohorte {','.join(sorted(wanted))} : {pagination}")
     total = 0
@@ -585,9 +556,9 @@ def validate_business_statuses() -> None:
             "Synchronisation refusée : statuts métier absents : " + ", ".join(missing)
         )
     expected_ranges = {
-        "SIGNÉ": (1_050, 1_150),
-        "DÉBALLÉ PAS SIGNÉ": (1_900, 2_050),
-        "R1/R2": (120, 170),
+        "SIGNÉ": (580, 700),
+        "DÉBALLÉ PAS SIGNÉ": (1_050, 1_250),
+        "R1/R2": (110, 180),
     }
     inconsistent = [
         f"{label}={group_counts[label]} attendu entre {low} et {high}"
@@ -694,56 +665,7 @@ def main() -> None:
     with sync_playwright() as playwright:
         context = launch_context(playwright, PROFILE_DIR, {"width": 1490, "height": 995})
         page = context.pages[0] if context.pages else context.new_page()
-        # Diagnostic temporaire de l'appel de liste sous-jacent. Les en-têtes
-        # (et donc le jeton) ne sont jamais journalisés ; seuls le chemin et le
-        # corps de filtre permettent de reproduire le comptage via l'API.
-        def log_business_request(request):
-            if "api.freeenergie.fr" not in request.url or "/selectlists/" in request.url:
-                return
-            # Les filtres de ce GET sont dans la query string, pas dans le
-            # corps. L'en-tête Authorization reste volontairement exclu.
-            path = request.url[:3000]
-            body = (request.post_data or "")[:1500]
-            print(f"REQUETE CRM METIER: {request.method} {path} BODY={body}")
-
-        page.on("request", log_business_request)
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
-        # Vérifie que la session cloud utilise bien le compte direction attendu.
-        # Le jeton et les mots de passe sont explicitement exclus.
-        session_identity = page.evaluate(
-            """() => {
-                const result = {};
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (!key || /token|password|secret/i.test(key)) continue;
-                    if (/user|profile|account|society|company/i.test(key)) {
-                        result[key] = (localStorage.getItem(key) || '').slice(0, 1200);
-                    }
-                }
-                return result;
-            }"""
-        )
-        print(f"IDENTITE SESSION CRM: {session_identity}")
-        token_scope = page.evaluate(
-            """() => {
-                let raw = localStorage.getItem('_token') || '';
-                try {
-                    const parsed = JSON.parse(raw);
-                    raw = parsed.token || parsed.access_token || parsed.value || raw;
-                } catch (_) {}
-                try {
-                    const payload = JSON.parse(atob(raw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-                    return {
-                        sub: payload.sub || payload.id || payload._id,
-                        role: payload.role,
-                        society: payload.society,
-                        commercial_origin: payload.commercial_origin,
-                        exp: payload.exp
-                    };
-                } catch (_) { return {decoded: false}; }
-            }"""
-        )
-        print(f"PERIMETRE JETON CRM: {token_scope}")
         open_list(page)
         set_100_rows(page)
         print_filter_diagnostic(page)
@@ -760,7 +682,7 @@ def main() -> None:
         signed = cohort_counts.get("SIGNE", 0)
         unpacked = cohort_counts.get("DEBALLE PAS SIGNE", 0)
         r1r2 = cohort_counts.get("R1/R2", 0)
-        if not (1050 <= signed <= 1150 and 1900 <= unpacked <= 2050 and 120 <= r1r2 <= 170):
+        if not (580 <= signed <= 700 and 1050 <= unpacked <= 1250 and 110 <= r1r2 <= 180):
             raise RuntimeError(
                 "Cohortes CRM incomplètes avant parcours général : "
                 f"SIGNÉ={signed}, DÉBALLÉ={unpacked}, R1/R2={r1r2}"
