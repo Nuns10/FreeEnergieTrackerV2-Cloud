@@ -490,7 +490,12 @@ def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
     """Collecte une cohorte métier complète et la fusionne dans le tunnel."""
     open_list(page)
     set_100_rows(page)
+    # Les statuts aval ne sont proposés qu'en mode Client. Une fois la valeur
+    # choisie, on revient sur Tous pour compter la cohorte globale, comme dans
+    # le filtre manuel de référence utilisé par la direction.
+    set_person_type(page, "Client")
     select_exact_statuses(page, wanted)
+    set_person_type(page, "Tous")
     pagination, expected = wait_for_pagination_total(page)
     print(f"Cohorte {','.join(sorted(wanted))} : {pagination}")
     total = 0
@@ -666,7 +671,6 @@ def main() -> None:
         clear_status_filter(page)
         # Valide d'abord les cohortes aval. En cas d'évolution du filtre CRM,
         # le diagnostic échoue immédiatement au lieu d'attendre les 172 pages.
-        set_person_type(page, "Client")
         cohort_counts = {}
         for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
             count = collect_status_cohort(page, wanted, synced_at)
