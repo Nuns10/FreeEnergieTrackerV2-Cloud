@@ -239,7 +239,12 @@ def print_filter_diagnostic(page) -> None:
     print("Ressources CRM métier : " + " | ".join(resource_urls[:30]))
     status_payload = page.evaluate(
         """async () => {
-            const response = await fetch('https://api.freeenergie.fr/v1/selectlists/status_lead');
+            const token = localStorage.getItem('_token');
+            const headers = token ? {Authorization: `Bearer ${token}`} : {};
+            const response = await fetch(
+                'https://api.freeenergie.fr/v1/selectlists/status_lead',
+                {headers}
+            );
             if (!response.ok) return {http_status: response.status};
             return await response.json();
         }"""
