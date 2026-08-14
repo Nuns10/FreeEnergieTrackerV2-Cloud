@@ -43,6 +43,12 @@ REQUIRED_STATUS_GROUPS = {
     "DÉBALLÉ PAS SIGNÉ": lambda value: value.startswith("DEBALLE PAS SIGNE"),
     "RDV ANNULÉ": lambda value: value.startswith("RDV ANNULE"),
 }
+REFERENCE_STATUS_TOTALS = {
+    "SIGNE": 1_081,
+    "DEBALLE PAS SIGNE": 1_957,
+    "R1": None,
+    "R2": None,
+}
 
 
 def wait_for_pagination_total(page, timeout_seconds: int = 20) -> tuple[str, int]:
@@ -220,6 +226,57 @@ def print_filter_diagnostic(page) -> None:
     print("Clés sessionStorage : " + " | ".join(browser_state_keys["session"]))
 
 
+def select_exact_statuses(page, wanted: set[str]) -> None:
+    """Sélectionne explicitement des statuts, sans dépendre du filtre mémorisé."""
+    select = status_filter_select(page)
+    select.first.click(force=True)
+    page.wait_for_timeout(600)
+    options = page.locator(
+        ".cdk-overlay-pane mat-option[role='option'], .cdk-overlay-pane [role='option']"
+    )
+    options.first.wait_for(state="attached", timeout=15_000)
+    found = set()
+    for index in range(options.count()):
+        option = options.nth(index)
+        label = normalize(option.text_content())
+        if not label:
+            continue
+        desired = label in wanted
+        if desired:
+            found.add(label)
+        if option_is_selected(option) != desired:
+            option.click(force=True)
+            page.wait_for_timeout(160)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(3500)
+    wait_for_rows(page)
+    missing = wanted - found
+    if missing:
+        raise RuntimeError("Statuts introuvables dans le filtre : " + ", ".join(sorted(missing)))
+
+
+def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
+    """Collecte une cohorte métier complète et la fusionne dans le tunnel."""
+    open_list(page)
+    set_100_rows(page)
+    select_exact_statuses(page, wanted)
+    pagination, expected = wait_for_pagination_total(page)
+    print(f"Cohorte {','.join(sorted(wanted))} : {pagination}")
+    total = 0
+    while True:
+        rows = extract_rows(page, synced_at)
+        invalid = [row[5] for row in rows if normalize(row[5]) not in wanted]
+        if invalid:
+            raise RuntimeError(f"Filtre cohorte inactif pour {wanted}: {invalid[:3]}")
+        save(rows)
+        total += len(rows)
+        if not next_page(page):
+            break
+    if total != expected:
+        raise RuntimeError(f"Cohorte incomplète {wanted}: {total}/{expected}")
+    return total
+
+
 def row_status_any(row) -> str | None:
     # `statusAt` contient la date du statut et son nom CSS contient lui aussi
     # « status ». Il ne doit jamais être confondu avec la colonne Statut.
@@ -260,6 +317,21 @@ def validate_business_statuses() -> None:
     if missing:
         raise RuntimeError(
             "Synchronisation refusée : statuts métier absents : " + ", ".join(missing)
+        )
+    expected_ranges = {
+        "SIGNÉ": (1_050, 1_150),
+        "DÉBALLÉ PAS SIGNÉ": (1_900, 2_050),
+        "R1/R2": (120, 170),
+    }
+    inconsistent = [
+        f"{label}={group_counts[label]} attendu entre {low} et {high}"
+        for label, (low, high) in expected_ranges.items()
+        if not low <= group_counts[label] <= high
+    ]
+    if inconsistent:
+        raise RuntimeError(
+            "Synchronisation refusée : écarts aux références CRM : "
+            + " | ".join(inconsistent)
         )
 
 
@@ -372,6 +444,13 @@ def main() -> None:
             if not next_page(page):
                 break
             page_number += 1
+        # Les statuts aval sont parfois exclus de la vue générale par le CRM.
+        # On les collecte explicitement pour garantir les chiffres direction.
+        cohort_counts = {}
+        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
+            count = collect_status_cohort(page, wanted, synced_at)
+            cohort_counts["/".join(sorted(wanted))] = count
+        print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
         context.close()
 
     # Une suppression n'est faite qu'après un parcours complet réussi.
