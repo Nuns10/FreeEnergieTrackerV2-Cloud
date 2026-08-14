@@ -708,6 +708,22 @@ def main() -> None:
 
         page.on("request", log_business_request)
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
+        # Vérifie que la session cloud utilise bien le compte direction attendu.
+        # Le jeton et les mots de passe sont explicitement exclus.
+        session_identity = page.evaluate(
+            """() => {
+                const result = {};
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (!key || /token|password|secret/i.test(key)) continue;
+                    if (/user|profile|account|society|company/i.test(key)) {
+                        result[key] = (localStorage.getItem(key) || '').slice(0, 1200);
+                    }
+                }
+                return result;
+            }"""
+        )
+        print(f"IDENTITE SESSION CRM: {session_identity}")
         open_list(page)
         set_100_rows(page)
         print_filter_diagnostic(page)
