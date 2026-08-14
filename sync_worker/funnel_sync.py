@@ -236,17 +236,33 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
     )
     options.first.wait_for(state="attached", timeout=15_000)
     found = set()
-    for index in range(options.count()):
-        option = options.nth(index)
-        label = normalize(option.text_content())
-        if not label:
-            continue
-        desired = label in wanted
-        if desired:
-            found.add(label)
-        if option_is_selected(option) != desired:
-            option.click(force=True)
-            page.wait_for_timeout(160)
+    panel = page.locator(".cdk-overlay-pane .mat-select-panel, .cdk-overlay-pane [role='listbox']").first
+    # Le menu est virtualisé/scrollable : SIGNÉ et DÉBALLÉ ne sont pas
+    # forcément présents dans le DOM au premier affichage.
+    for _scroll in range(30):
+        for index in range(options.count()):
+            option = options.nth(index)
+            label = normalize(option.text_content())
+            if not label:
+                continue
+            desired = label in wanted
+            if desired:
+                found.add(label)
+            if option_is_selected(option) != desired:
+                option.click(force=True)
+                page.wait_for_timeout(120)
+        if wanted <= found:
+            break
+        moved = panel.evaluate(
+            """el => {
+                const before = el.scrollTop;
+                el.scrollTop = Math.min(el.scrollTop + Math.max(el.clientHeight * 0.8, 120), el.scrollHeight);
+                return el.scrollTop !== before;
+            }"""
+        )
+        page.wait_for_timeout(250)
+        if not moved:
+            break
     page.keyboard.press("Escape")
     page.wait_for_timeout(3500)
     wait_for_rows(page)
