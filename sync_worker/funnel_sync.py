@@ -685,7 +685,9 @@ def main() -> None:
         def log_business_request(request):
             if "api.freeenergie.fr" not in request.url or "/selectlists/" in request.url:
                 return
-            path = request.url.split("?", 1)[0]
+            # Les filtres de ce GET sont dans la query string, pas dans le
+            # corps. L'en-tête Authorization reste volontairement exclu.
+            path = request.url[:3000]
             body = (request.post_data or "")[:1500]
             print(f"REQUETE CRM METIER: {request.method} {path} BODY={body}")
 
