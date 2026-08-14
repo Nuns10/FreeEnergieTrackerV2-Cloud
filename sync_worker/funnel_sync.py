@@ -228,6 +228,15 @@ def print_filter_diagnostic(page) -> None:
     )
     print("Clés localStorage : " + " | ".join(browser_state_keys["local"]))
     print("Clés sessionStorage : " + " | ".join(browser_state_keys["session"]))
+    resource_urls = page.evaluate(
+        """() => performance.getEntriesByType('resource')
+            .map(entry => entry.name)
+            .filter(name => /lead|prospect|client/i.test(name))
+            .map(name => name.split('?')[0])
+            .filter((name, index, values) => values.indexOf(name) === index)
+        """
+    )
+    print("Ressources CRM métier : " + " | ".join(resource_urls[:30]))
 
 
 def select_exact_statuses(page, wanted: set[str]) -> None:
