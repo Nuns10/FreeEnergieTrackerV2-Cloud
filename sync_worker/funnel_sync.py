@@ -231,12 +231,20 @@ def print_filter_diagnostic(page) -> None:
     resource_urls = page.evaluate(
         """() => performance.getEntriesByType('resource')
             .map(entry => entry.name)
-            .filter(name => /lead|prospect|client/i.test(name))
+            .filter(name => name.includes('api.freeenergie.fr'))
             .map(name => name.split('?')[0])
             .filter((name, index, values) => values.indexOf(name) === index)
         """
     )
     print("Ressources CRM métier : " + " | ".join(resource_urls[:30]))
+    status_payload = page.evaluate(
+        """async () => {
+            const response = await fetch('https://api.freeenergie.fr/v1/selectlists/status_lead');
+            if (!response.ok) return {http_status: response.status};
+            return await response.json();
+        }"""
+    )
+    print(f"Réponse selectlists/status_lead : {str(status_payload)[:12000]}")
 
 
 def select_exact_statuses(page, wanted: set[str]) -> None:
