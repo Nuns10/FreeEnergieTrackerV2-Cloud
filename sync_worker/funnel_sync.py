@@ -317,6 +317,40 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
         set_search_value("")
         page.wait_for_timeout(350)
 
+        # Certains statuts aval existent bien dans le menu mais le moteur de
+        # recherche du CRM renvoie à tort « aucun statut ne correspond ».
+        # Le parcours clavier force Angular Material à rendre chaque option,
+        # y compris celles situées hors écran.
+        missing_after_search = wanted - found
+        if missing_after_search:
+            live_options = page.locator(
+                ".cdk-overlay-pane mat-option[role='option']:visible, "
+                ".cdk-overlay-pane [role='option']:visible"
+            )
+            if live_options.count():
+                live_options.first.evaluate("element => element.focus()")
+                page.keyboard.press("End")
+                keyboard_labels = []
+                for _ in range(80):
+                    active = page.locator(
+                        ".cdk-overlay-pane mat-option.mat-active[role='option']:visible, "
+                        ".cdk-overlay-pane [role='option'].mat-active:visible"
+                    ).last
+                    if active.count():
+                        label = normalize(active.text_content())
+                        if label and label not in keyboard_labels:
+                            keyboard_labels.append(label)
+                        if label in wanted and label not in found:
+                            if not option_is_selected(active):
+                                page.keyboard.press("Space")
+                                page.wait_for_timeout(180)
+                            found.add(label)
+                        if wanted <= found:
+                            break
+                    page.keyboard.press("ArrowUp")
+                    page.wait_for_timeout(80)
+                print(f"Parcours clavier des statuts : {keyboard_labels}")
+
     panel = page.locator(".cdk-overlay-pane .mat-select-panel, .cdk-overlay-pane [role='listbox']").first
     # Le menu est virtualisé/scrollable : SIGNÉ et DÉBALLÉ ne sont pas
     # forcément présents dans le DOM au premier affichage.
