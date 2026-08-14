@@ -135,14 +135,15 @@ def clear_status_filter(page) -> None:
             const existed = localStorage.getItem('leadFilter') !== null
                 || localStorage.getItem('displayAttributed') !== null;
             localStorage.removeItem('leadFilter');
-            // L'absence de cette clé réactive la vue restrictive par défaut.
-            // La valeur false correspond à « afficher aussi les non attribués ».
-            localStorage.setItem('displayAttributed', 'false');
+            // `displayAttributed=true` est la vue réellement globale du CRM :
+            // elle inclut les fiches attribuées et non attribuées. La valeur
+            // false conservée par le profil cloud amputait les cohortes aval.
+            localStorage.setItem('displayAttributed', 'true');
             return existed;
         }"""
     )
     if removed_storage_filter:
-        print("Filtre leadFilter supprimé et displayAttributed forcé à false.")
+        print("Filtre leadFilter supprimé et displayAttributed forcé à true.")
         page.reload(wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
@@ -495,7 +496,21 @@ def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
     # le filtre manuel de référence utilisé par la direction.
     set_person_type(page, "Client")
     select_exact_statuses(page, wanted)
+    diagnostic_client = page.evaluate(
+        """() => ({
+            displayAttributed: localStorage.getItem('displayAttributed'),
+            leadFilter: localStorage.getItem('leadFilter')
+        })"""
+    )
+    print(f"Filtre cohorte en mode Client : {diagnostic_client}")
     set_person_type(page, "Tous")
+    diagnostic_all = page.evaluate(
+        """() => ({
+            displayAttributed: localStorage.getItem('displayAttributed'),
+            leadFilter: localStorage.getItem('leadFilter')
+        })"""
+    )
+    print(f"Filtre cohorte en mode Tous : {diagnostic_all}")
     pagination, expected = wait_for_pagination_total(page)
     print(f"Cohorte {','.join(sorted(wanted))} : {pagination}")
     total = 0
@@ -676,6 +691,16 @@ def main() -> None:
             count = collect_status_cohort(page, wanted, synced_at)
             cohort_counts["/".join(sorted(wanted))] = count
         print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
+        # Arrêt rapide de diagnostic : ne pas perdre vingt minutes à parcourir
+        # le tunnel si les cohortes de référence ne sont pas encore complètes.
+        signed = cohort_counts.get("SIGNE", 0)
+        unpacked = cohort_counts.get("DEBALLE PAS SIGNE", 0)
+        r1r2 = cohort_counts.get("R1/R2", 0)
+        if not (1050 <= signed <= 1150 and 1900 <= unpacked <= 2050 and 120 <= r1r2 <= 170):
+            raise RuntimeError(
+                "Cohortes CRM incomplètes avant parcours général : "
+                f"SIGNÉ={signed}, DÉBALLÉ={unpacked}, R1/R2={r1r2}"
+            )
 
         open_list(page)
         set_100_rows(page)
