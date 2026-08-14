@@ -278,13 +278,13 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
             # inutilement 30 secondes. L'événement input reste néanmoins le
             # mécanisme écouté par ngx-mat-select-search.
             search.evaluate(
-                """(element, nextValue) => {
-                    element.value = nextValue;
-                    element.dispatchEvent(new Event('input', {bubbles: true}));
-                    element.dispatchEvent(new Event('change', {bubbles: true}));
-                }""",
-                value,
+                """element => {
+                    element.disabled = false;
+                    element.removeAttribute('disabled');
+                    element.removeAttribute('readonly');
+                }"""
             )
+            search.fill(value, force=True)
 
         display_names = {
             "SIGNE": "Signé",
@@ -300,6 +300,12 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
                 ".cdk-overlay-pane mat-option[role='option'], "
                 ".cdk-overlay-pane [role='option']"
             )
+            labels_after_search = [
+                normalize(matches.nth(i).text_content())
+                for i in range(matches.count())
+                if normalize(matches.nth(i).text_content())
+            ]
+            print(f"Recherche statut {target}: {labels_after_search[:12]}")
             for index in range(matches.count()):
                 option = matches.nth(index)
                 if normalize(option.text_content()) == target:
@@ -524,6 +530,17 @@ def main() -> None:
         set_100_rows(page)
         print_filter_diagnostic(page)
         clear_status_filter(page)
+        # Valide d'abord les cohortes aval. En cas d'évolution du filtre CRM,
+        # le diagnostic échoue immédiatement au lieu d'attendre les 172 pages.
+        cohort_counts = {}
+        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
+            count = collect_status_cohort(page, wanted, synced_at)
+            cohort_counts["/".join(sorted(wanted))] = count
+        print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
+
+        open_list(page)
+        set_100_rows(page)
+        clear_status_filter(page)
         page_number = 1
         while True:
             rows = extract_rows(page, synced_at)
@@ -535,13 +552,6 @@ def main() -> None:
             if not next_page(page):
                 break
             page_number += 1
-        # Les statuts aval sont parfois exclus de la vue générale par le CRM.
-        # On les collecte explicitement pour garantir les chiffres direction.
-        cohort_counts = {}
-        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
-            count = collect_status_cohort(page, wanted, synced_at)
-            cohort_counts["/".join(sorted(wanted))] = count
-        print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
         context.close()
 
     # Une suppression n'est faite qu'après un parcours complet réussi.
