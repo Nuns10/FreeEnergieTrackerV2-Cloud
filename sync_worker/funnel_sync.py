@@ -454,6 +454,38 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
         raise RuntimeError("Statuts introuvables dans le filtre : " + ", ".join(sorted(missing)))
 
 
+def set_person_type(page, target: str) -> None:
+    """Bascule la liste CRM entre Tous, Prospect et Client."""
+    field = page.locator("mat-form-field").filter(has_text=re.compile("Type de personne", re.I)).first
+    select = field.locator("mat-select, [role='combobox']").first
+    if select.count() == 0:
+        raise RuntimeError("Filtre Type de personne introuvable.")
+    current = normalize(select.text_content())
+    wanted = normalize(target)
+    if wanted in current:
+        return
+    select.click(force=True)
+    page.wait_for_timeout(450)
+    options = page.locator(
+        ".cdk-overlay-pane mat-option[role='option']:visible, "
+        ".cdk-overlay-pane [role='option']:visible"
+    )
+    chosen = None
+    for index in range(options.count()):
+        option = options.nth(index)
+        if normalize(option.text_content()) == wanted:
+            chosen = option
+            break
+    if chosen is None:
+        labels = [normalize(options.nth(i).text_content()) for i in range(options.count())]
+        page.keyboard.press("Escape")
+        raise RuntimeError(f"Type de personne {target} introuvable : {labels}")
+    chosen.click(force=True)
+    page.wait_for_timeout(2500)
+    wait_for_rows(page)
+    print(f"Type de personne sélectionné : {target}")
+
+
 def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
     """Collecte une cohorte métier complète et la fusionne dans le tunnel."""
     open_list(page)
@@ -634,6 +666,7 @@ def main() -> None:
         clear_status_filter(page)
         # Valide d'abord les cohortes aval. En cas d'évolution du filtre CRM,
         # le diagnostic échoue immédiatement au lieu d'attendre les 172 pages.
+        set_person_type(page, "Client")
         cohort_counts = {}
         for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
             count = collect_status_cohort(page, wanted, synced_at)
@@ -642,6 +675,7 @@ def main() -> None:
 
         open_list(page)
         set_100_rows(page)
+        set_person_type(page, "Tous")
         clear_status_filter(page)
         page_number = 1
         while True:
