@@ -724,6 +724,26 @@ def main() -> None:
             }"""
         )
         print(f"IDENTITE SESSION CRM: {session_identity}")
+        token_scope = page.evaluate(
+            """() => {
+                let raw = localStorage.getItem('_token') || '';
+                try {
+                    const parsed = JSON.parse(raw);
+                    raw = parsed.token || parsed.access_token || parsed.value || raw;
+                } catch (_) {}
+                try {
+                    const payload = JSON.parse(atob(raw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+                    return {
+                        sub: payload.sub || payload.id || payload._id,
+                        role: payload.role,
+                        society: payload.society,
+                        commercial_origin: payload.commercial_origin,
+                        exp: payload.exp
+                    };
+                } catch (_) { return {decoded: false}; }
+            }"""
+        )
+        print(f"PERIMETRE JETON CRM: {token_scope}")
         open_list(page)
         set_100_rows(page)
         print_filter_diagnostic(page)
