@@ -239,8 +239,20 @@ def print_filter_diagnostic(page) -> None:
     print("Ressources CRM métier : " + " | ".join(resource_urls[:30]))
     status_payload = page.evaluate(
         """async () => {
-            const token = localStorage.getItem('_token');
-            const headers = token ? {Authorization: `Bearer ${token}`} : {};
+            const rawToken = localStorage.getItem('_token');
+            let token = rawToken;
+            if (rawToken) {
+                try {
+                    const parsed = JSON.parse(rawToken);
+                    token = typeof parsed === 'string'
+                        ? parsed
+                        : (parsed.token || parsed.access_token || parsed.accessToken || rawToken);
+                } catch (_) {}
+            }
+            const authorization = token
+                ? (token.toLowerCase().startsWith('bearer ') ? token : `Bearer ${token}`)
+                : null;
+            const headers = authorization ? {Authorization: authorization} : {};
             const response = await fetch(
                 'https://api.freeenergie.fr/v1/selectlists/status_lead',
                 {headers}
