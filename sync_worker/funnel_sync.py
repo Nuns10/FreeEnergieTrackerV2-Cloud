@@ -132,13 +132,15 @@ def clear_status_filter(page) -> None:
     # même après les avoir décochés visuellement.
     removed_storage_filter = page.evaluate(
         """() => {
-            const existed = localStorage.getItem('leadFilter') !== null;
+            const existed = localStorage.getItem('leadFilter') !== null
+                || localStorage.getItem('displayAttributed') !== null;
             localStorage.removeItem('leadFilter');
+            localStorage.removeItem('displayAttributed');
             return existed;
         }"""
     )
     if removed_storage_filter:
-        print("Filtre persistant leadFilter supprimé du navigateur.")
+        print("Filtres persistants leadFilter/displayAttributed supprimés du navigateur.")
         page.reload(wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
