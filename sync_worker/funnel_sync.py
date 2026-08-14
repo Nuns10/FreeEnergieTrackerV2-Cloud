@@ -259,6 +259,20 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
     # La recherche intégrée est beaucoup plus fiable que le défilement du
     # panneau virtualisé : SIGNÉ se trouve hors de la portion initiale du DOM.
     if search.count():
+        def set_search_value(value: str) -> None:
+            # Le CRM marque brièvement ce champ « disabled » après chaque
+            # bascule globale. Une saisie Playwright classique attend alors
+            # inutilement 30 secondes. L'événement input reste néanmoins le
+            # mécanisme écouté par ngx-mat-select-search.
+            search.evaluate(
+                """(element, nextValue) => {
+                    element.value = nextValue;
+                    element.dispatchEvent(new Event('input', {bubbles: true}));
+                    element.dispatchEvent(new Event('change', {bubbles: true}));
+                }""",
+                value,
+            )
+
         display_names = {
             "SIGNE": "Signé",
             "DEBALLE PAS SIGNE": "Déballé pas signé",
@@ -267,7 +281,7 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
             "RDV ANNULE": "RDV annulé",
         }
         for target in sorted(wanted):
-            search.fill(display_names.get(target, target))
+            set_search_value(display_names.get(target, target))
             page.wait_for_timeout(500)
             matches = page.locator(
                 ".cdk-overlay-pane mat-option[role='option'], "
@@ -281,7 +295,7 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
                         page.wait_for_timeout(200)
                     found.add(target)
                     break
-        search.fill("")
+        set_search_value("")
         page.wait_for_timeout(350)
 
     panel = page.locator(".cdk-overlay-pane .mat-select-panel, .cdk-overlay-pane [role='listbox']").first
