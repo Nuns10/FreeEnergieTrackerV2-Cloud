@@ -504,6 +504,21 @@ def collect_status_cohort(page, wanted: set[str], synced_at: str) -> int:
     )
     print(f"Filtre cohorte en mode Client : {diagnostic_client}")
     set_person_type(page, "Tous")
+    # Les chiffres de référence de la direction incluent l'historique archivé.
+    # Le profil automatisé imposait `deleted=0`, ce qui retirait notamment 458
+    # SIGNÉS et plus de 800 DÉBALLÉS. Mettre la valeur à undefined fait omettre
+    # `isDeleted` dans l'appel /v1/leads, comme pour un périmètre historique.
+    page.evaluate(
+        """() => {
+            const raw = localStorage.getItem('leadFilter');
+            const filter = raw ? JSON.parse(raw) : {};
+            filter.deleted = 'undefined';
+            localStorage.setItem('leadFilter', JSON.stringify(filter));
+        }"""
+    )
+    page.reload(wait_until="domcontentloaded", timeout=90_000)
+    open_list(page)
+    set_100_rows(page)
     diagnostic_all = page.evaluate(
         """() => ({
             displayAttributed: localStorage.getItem('displayAttributed'),
