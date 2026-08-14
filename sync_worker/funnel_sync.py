@@ -135,12 +135,14 @@ def clear_status_filter(page) -> None:
             const existed = localStorage.getItem('leadFilter') !== null
                 || localStorage.getItem('displayAttributed') !== null;
             localStorage.removeItem('leadFilter');
-            localStorage.removeItem('displayAttributed');
+            // L'absence de cette clé réactive la vue restrictive par défaut.
+            // La valeur false correspond à « afficher aussi les non attribués ».
+            localStorage.setItem('displayAttributed', 'false');
             return existed;
         }"""
     )
     if removed_storage_filter:
-        print("Filtres persistants leadFilter/displayAttributed supprimés du navigateur.")
+        print("Filtre leadFilter supprimé et displayAttributed forcé à false.")
         page.reload(wait_until="domcontentloaded", timeout=90_000)
         open_list(page)
         set_100_rows(page)
