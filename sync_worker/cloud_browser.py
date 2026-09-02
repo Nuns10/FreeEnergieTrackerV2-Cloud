@@ -75,6 +75,13 @@ def ensure_crm_login(page, target_url: str) -> None:
             f"Formulaire de connexion CRM introuvable (page actuelle : {page.url})."
         ) from exc
 
+    auth_events: list[str] = []
+
+    def record_auth_response(response) -> None:
+        if "/auth/" in response.url:
+            auth_events.append(f"{response.status} {response.url.split('?')[0]}")
+
+    page.on("response", record_auth_response)
     login_button = page.locator(
         "button:has-text('Connexion'), button:has-text('Se connecter'), "
         "button[type='submit']"
@@ -104,6 +111,15 @@ def ensure_crm_login(page, target_url: str) -> None:
         )
         page.wait_for_timeout(1000)
     if not connected:
+        diagnostic_dir = Path(__file__).resolve().parent / "diagnostic_cloud"
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(diagnostic_dir / "connexion-crm.png"), full_page=True)
+        print("Réponses d'authentification CRM : " + (" | ".join(auth_events[-20:]) or "aucune"))
+        print(
+            "État du formulaire CRM : "
+            f"bouton_actif={login_button.is_enabled()}, "
+            f"url={page.url.split('?')[0]}"
+        )
         raise RuntimeError("La connexion CRM reste sur la page d'identification après 3 tentatives.")
     page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1_500)
