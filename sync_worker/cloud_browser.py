@@ -27,11 +27,17 @@ def launch_context(playwright, profile_dir: Path, viewport: dict):
 
 def ensure_crm_login(page, target_url: str) -> None:
     """Reconnecte le robot si la session GitHub enregistrée a expiré."""
-    logged_in = page.locator(
+    authenticated = page.locator(
         "a[href='/dashboard'], button[aria-label='Ouvrir le menu utilisateur']"
-    ).count() > 0
-    if logged_in:
+    )
+    # La nouvelle interface CRM rend le menu après le chargement HTML. Attendre
+    # sa présence évite de prendre une page encore en cours d'initialisation
+    # pour une session expirée.
+    try:
+        authenticated.first.wait_for(state="attached", timeout=15_000)
         return
+    except Exception:
+        pass
 
     email = os.getenv("CRM_LOGIN_EMAIL", "").strip()
     password = os.getenv("CRM_LOGIN_PASSWORD", "")
@@ -46,16 +52,35 @@ def ensure_crm_login(page, target_url: str) -> None:
         wait_until="domcontentloaded",
         timeout=90_000,
     )
-    page.wait_for_timeout(1_000)
+    # Une session encore valide peut être redirigée directement vers le CRM.
+    try:
+        authenticated.first.wait_for(state="attached", timeout=5_000)
+        page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
+        return
+    except Exception:
+        pass
 
-    email_input = page.locator("input[placeholder='Email'], input[placeholder='email']").first
-    password_input = page.locator("input[type='password']").first
-    if email_input.count() == 0 or password_input.count() == 0:
-        raise RuntimeError("Formulaire de connexion CRM introuvable.")
+    email_input = page.locator(
+        "input[type='email'], input[name='email'], input[autocomplete='username'], "
+        "input[placeholder*='mail' i]"
+    ).first
+    password_input = page.locator(
+        "input[type='password'], input[name='password'], input[autocomplete='current-password']"
+    ).first
+    try:
+        email_input.wait_for(state="visible", timeout=20_000)
+        password_input.wait_for(state="visible", timeout=20_000)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Formulaire de connexion CRM introuvable (page actuelle : {page.url})."
+        ) from exc
 
     email_input.fill(email)
     password_input.fill(password)
-    page.get_by_role("button", name="Connexion").click()
+    login_button = page.locator(
+        "button:has-text('Connexion'), button:has-text('Se connecter')"
+    ).first
+    login_button.click()
     page.wait_for_url(lambda url: "/sign-in" not in url, timeout=90_000)
     page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1_500)
