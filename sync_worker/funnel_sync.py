@@ -461,6 +461,12 @@ def set_person_type(page, target: str) -> None:
     field = page.locator("mat-form-field").filter(has_text=re.compile("Type de personne", re.I)).first
     select = field.locator("mat-select, [role='combobox']").first
     if select.count() == 0:
+        # La grille déployée en septembre 2026 a fusionné Prospects et Clients
+        # dans une seule liste et supprimé ce sélecteur. Le filtre Statut
+        # contient directement les deux familles : aucune bascule nécessaire.
+        if page.get_by_role("combobox", name="Statut", exact=True).count():
+            print("Nouveau CRM : filtre Type de personne absent, liste unifiée utilisée.")
+            return
         raise RuntimeError("Filtre Type de personne introuvable.")
     current = normalize(select.text_content())
     wanted = normalize(target)
