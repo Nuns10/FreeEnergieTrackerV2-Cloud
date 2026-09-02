@@ -5,6 +5,7 @@ import base64
 import json
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 
 CRM_BASE_URL = "https://crm.freeenergie.fr"
@@ -26,7 +27,10 @@ def launch_context(playwright, profile_dir: Path, viewport: dict):
 
 def ensure_crm_login(page, target_url: str) -> None:
     """Reconnecte le robot si la session GitHub enregistrée a expiré."""
-    if "/sign-in" not in page.url and page.get_by_role("button", name="Connexion").count() == 0:
+    logged_in = page.locator(
+        "a[href='/dashboard'], button[aria-label='Ouvrir le menu utilisateur']"
+    ).count() > 0
+    if logged_in:
         return
 
     email = os.getenv("CRM_LOGIN_EMAIL", "").strip()
@@ -35,6 +39,14 @@ def ensure_crm_login(page, target_url: str) -> None:
         raise RuntimeError(
             "Session CRM expirée et secrets CRM_LOGIN_EMAIL/CRM_LOGIN_PASSWORD absents."
         )
+
+    return_path = "/" + target_url.split("/", 3)[-1]
+    page.goto(
+        f"{CRM_BASE_URL}/sign-in?returnUrl={quote(return_path, safe='')}",
+        wait_until="domcontentloaded",
+        timeout=90_000,
+    )
+    page.wait_for_timeout(1_000)
 
     email_input = page.locator("input[placeholder='Email'], input[placeholder='email']").first
     password_input = page.locator("input[type='password']").first
