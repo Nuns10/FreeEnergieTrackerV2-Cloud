@@ -92,9 +92,10 @@ def set_100_rows(page: Page) -> None:
 
 
 def status_filter_select(page: Page):
-    return page.locator(
-        "th.mat-column-status-search mat-select[placeholder='Status']"
-    )
+    current = page.get_by_role("combobox", name="Statut", exact=True)
+    if current.count():
+        return current
+    return page.locator("th.mat-column-status-search mat-select[placeholder='Status']")
 
 
 def option_is_selected(option) -> bool:
