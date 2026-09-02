@@ -125,8 +125,24 @@ def clear_status_filter(page) -> None:
     # 17 159 correspond à « tous les statuts actuellement sélectionnés », pas
     # à l'ensemble du CRM. Seul le total non filtré de 25 184 autorise un
     # retour immédiat ; sinon il faut réellement vider le filtre.
+    unified_crm = (
+        page.get_by_role("combobox", name="Statut", exact=True).count() > 0
+        and page.locator("mat-form-field").filter(
+            has_text=re.compile("Type de personne", re.I)
+        ).count() == 0
+    )
     if initial_total >= EXPECTED_TOTAL_LEADS:
         print(f"Aucun filtre à retirer : {initial_total}/{EXPECTED_TOTAL_LEADS} leads visibles.")
+        return
+    # Depuis septembre 2026, le CRM présente une grille unifiée et n'expose
+    # plus le filtre « Type de personne ». Son total naturel (actuellement
+    # proche de 20 000) est déjà la vue complète autorisée pour ce compte.
+    # Modifier les anciennes clés localStorage vide désormais la grille.
+    if unified_crm and initial_total >= MINIMUM_ACCEPTABLE_LEADS:
+        print(
+            "Nouveau CRM unifié : vue naturelle conservée, "
+            f"{initial_total} leads visibles."
+        )
         return
     # Le CRM conserve aussi le filtre complet dans localStorage. L'interface
     # Angular réapplique sinon automatiquement les 17 statuts renseignés,
