@@ -58,11 +58,24 @@ def wait_for_rows(page: Page, timeout_ms: int = 30_000) -> None:
 
 
 def open_list(page: Page) -> None:
-    page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
-    page.wait_for_timeout(1500)
-    ensure_crm_login(page, LIST_URL)
-    wait_for_rows(page)
-    print("Page Prospection/Client ouverte.")
+    last_error = None
+    for attempt in range(3):
+        page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
+        page.wait_for_timeout(2500 + attempt * 1500)
+        ensure_crm_login(page, LIST_URL)
+        try:
+            wait_for_rows(page, timeout_ms=45_000)
+            print("Page Prospection/Client ouverte.")
+            return
+        except Exception as exc:
+            last_error = exc
+            status = paginator_text(page)
+            print(
+                f"Grille CRM vide après chargement (tentative {attempt + 1}/3, "
+                f"page={page.url}, pagination={status or 'absente'})."
+            )
+            page.wait_for_timeout(1500)
+    raise RuntimeError("La grille CRM ne charge aucune ligne après 3 tentatives.") from last_error
 
 
 def paginator_text(page: Page) -> str:
