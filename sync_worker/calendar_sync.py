@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import Locator, Page, sync_playwright
-from cloud_browser import launch_context
+from cloud_browser import ensure_crm_login, launch_context
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser-profile"
@@ -204,6 +204,7 @@ def rebuild_daily_activity() -> None:
 def open_calendar(page: Page) -> None:
     page.goto(CALENDAR_URL, wait_until="domcontentloaded", timeout=90000)
     page.wait_for_timeout(1800)
+    ensure_crm_login(page, CALENDAR_URL)
     if page.get_by_text("Intervenants", exact=False).count() == 0:
         raise RuntimeError("Calendrier inaccessible : session CRM non connectée.")
 
