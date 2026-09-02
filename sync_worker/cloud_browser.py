@@ -75,12 +75,35 @@ def ensure_crm_login(page, target_url: str) -> None:
             f"Formulaire de connexion CRM introuvable (page actuelle : {page.url})."
         ) from exc
 
-    email_input.fill(email)
-    password_input.fill(password)
     login_button = page.locator(
-        "button:has-text('Connexion'), button:has-text('Se connecter')"
+        "button:has-text('Connexion'), button:has-text('Se connecter'), "
+        "button[type='submit']"
     ).first
-    login_button.click()
-    page.wait_for_url(lambda url: "/sign-in" not in url, timeout=90_000)
+    connected = False
+    for attempt in range(3):
+        email_input.fill(email)
+        password_input.fill(password)
+        if attempt == 0:
+            login_button.click(force=True)
+        else:
+            password_input.press("Enter")
+        # La nouvelle page de connexion change parfois d'URL sans événement de
+        # navigation classique. On contrôle donc directement l'URL et le menu
+        # authentifié, avec plusieurs tentatives en cas de réponse API lente.
+        for _ in range(60):
+            page.wait_for_timeout(500)
+            if "/sign-in" not in page.url or authenticated.count():
+                connected = True
+                break
+        if connected:
+            break
+        messages = page.locator("[role='alert'], mat-error, .alert, .error").all_text_contents()
+        print(
+            f"Connexion CRM sans redirection (tentative {attempt + 1}/3)"
+            + (f" : {' | '.join(messages)[:400]}" if messages else ".")
+        )
+        page.wait_for_timeout(1000)
+    if not connected:
+        raise RuntimeError("La connexion CRM reste sur la page d'identification après 3 tentatives.")
     page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1_500)
