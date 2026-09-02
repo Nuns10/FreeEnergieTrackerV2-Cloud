@@ -18,6 +18,8 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       CRM_STORAGE_STATE_B64: ${{ secrets.CRM_STORAGE_STATE_B64 }}
+      CRM_LOGIN_EMAIL: ${{ secrets.CRM_LOGIN_EMAIL }}
+      CRM_LOGIN_PASSWORD: ${{ secrets.CRM_LOGIN_PASSWORD }}
       PYTHONUNBUFFERED: "1"
 
     steps:
