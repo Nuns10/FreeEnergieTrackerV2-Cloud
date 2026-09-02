@@ -51,7 +51,7 @@ def first_visible(locator):
 
 
 def wait_for_rows(page: Page, timeout_ms: int = 30_000) -> None:
-    page.locator("tbody tr.mat-row").first.wait_for(
+    page.locator("tbody tr.mat-row, tbody tr.mat-mdc-row, tbody tr[mat-row]").first.wait_for(
         state="attached",
         timeout=timeout_ms,
     )
@@ -66,7 +66,7 @@ def open_list(page: Page) -> None:
 
 
 def paginator_text(page: Page) -> str:
-    locator = page.locator(".mat-paginator-range-label")
+    locator = page.locator(".mat-paginator-range-label, .mat-mdc-paginator-range-label, [role='status']")
     return clean(locator.first.inner_text()) if locator.count() else ""
 
 
@@ -246,7 +246,7 @@ def row_status(row) -> str:
 
 
 def verify_filtered_results(page: Page) -> None:
-    rows = page.locator("tbody tr.mat-row")
+    rows = page.locator("tbody tr.mat-row, tbody tr.mat-mdc-row, tbody tr[mat-row]")
     observed: set[str] = set()
 
     for _ in range(20):
@@ -281,7 +281,7 @@ def cell_text(row, css_column: str) -> str | None:
 
 
 def extract_page_records(page: Page) -> list[dict[str, Any]]:
-    rows = page.locator("tbody tr.mat-row")
+    rows = page.locator("tbody tr.mat-row, tbody tr.mat-mdc-row, tbody tr[mat-row]")
     records: list[dict[str, Any]] = []
 
     for index in range(rows.count()):
@@ -325,7 +325,10 @@ def extract_page_records(page: Page) -> list[dict[str, Any]]:
 
 
 def next_page(page: Page) -> bool:
-    button = page.locator("button.mat-paginator-navigation-next").first
+    button = page.locator(
+        "button.mat-paginator-navigation-next, button.mat-mdc-paginator-navigation-next, "
+        "button[aria-label='page suivante']"
+    ).first
 
     if button.count() == 0:
         return False

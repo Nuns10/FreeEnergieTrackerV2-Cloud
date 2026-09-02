@@ -9,6 +9,7 @@ tableau complet et mémorise les colonnes utiles au pilotage de la conversion.
 import sqlite3
 import re
 import time
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -573,17 +574,22 @@ def validate_business_statuses() -> None:
 
 
 def extract_rows(page, synced_at: str) -> list[tuple]:
-    rows = page.locator("tbody tr.mat-row")
+    rows = page.locator("tbody tr.mat-row, tbody tr.mat-mdc-row, tbody tr[mat-row]")
     result: list[tuple] = []
     for index in range(rows.count()):
         row = rows.nth(index)
         link = row.locator("td.mat-column-name a[href^='/lead/']").first
-        if link.count() == 0:
-            continue
-        href = link.get_attribute("href") or ""
-        crm_id = href.rstrip("/").split("/")[-1]
+        href = link.get_attribute("href") or "" if link.count() else ""
+        crm_id = href.rstrip("/").split("/")[-1] if href else ""
+        # Depuis septembre 2026, la grille CRM n'expose plus de lien dans la
+        # colonne Nom. Une clé stable permet néanmoins de conserver la ligne
+        # et ses indicateurs dans le tunnel Supabase.
         if not crm_id or crm_id == "lead":
-            continue
+            identity = "|".join(
+                clean(cell_text(row, column))
+                for column in ("createdAt", "name", "phone", "source")
+            )
+            crm_id = "grid-" + hashlib.sha1(identity.encode("utf-8")).hexdigest()
         result.append(
             (
                 crm_id,
@@ -636,20 +642,29 @@ def save(rows: list[tuple]) -> None:
 
 
 def next_page(page) -> bool:
-    button = page.locator("button.mat-paginator-navigation-next").first
+    button = page.locator(
+        "button.mat-paginator-navigation-next, button.mat-mdc-paginator-navigation-next, "
+        "button[aria-label='page suivante']"
+    ).first
     if button.count() == 0 or button.get_attribute("disabled") is not None:
         return False
     if "mat-button-disabled" in (button.get_attribute("class") or ""):
         return False
     before = paginator_text(page)
-    first_link = page.locator("tbody tr.mat-row td.mat-column-name a[href^='/lead/']").first
+    first_link = page.locator(
+        "tbody tr.mat-row td.mat-column-name a[href^='/lead/'], "
+        "tbody tr.mat-mdc-row td.mat-column-name, tbody tr[mat-row] td.mat-column-name"
+    ).first
     before_href = first_link.get_attribute("href") if first_link.count() else None
     for attempt in range(3):
         button.click(force=True)
         for _ in range(80):
             page.wait_for_timeout(250)
             after = paginator_text(page)
-            current_link = page.locator("tbody tr.mat-row td.mat-column-name a[href^='/lead/']").first
+            current_link = page.locator(
+                "tbody tr.mat-row td.mat-column-name a[href^='/lead/'], "
+                "tbody tr.mat-mdc-row td.mat-column-name, tbody tr[mat-row] td.mat-column-name"
+            ).first
             after_href = current_link.get_attribute("href") if current_link.count() else None
             if (after and after != before) or (before_href and after_href and after_href != before_href):
                 wait_for_rows(page)
