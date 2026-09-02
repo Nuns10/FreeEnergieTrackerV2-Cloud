@@ -14,7 +14,7 @@ import pandas as pd
 from playwright.sync_api import Page, sync_playwright
 
 from database import upsert
-from cloud_browser import launch_context
+from cloud_browser import ensure_crm_login, launch_context
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,6 +60,7 @@ def wait_for_rows(page: Page, timeout_ms: int = 30_000) -> None:
 def open_list(page: Page) -> None:
     page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
     page.wait_for_timeout(1500)
+    ensure_crm_login(page, LIST_URL)
     wait_for_rows(page)
     print("Page Prospection/Client ouverte.")
 
