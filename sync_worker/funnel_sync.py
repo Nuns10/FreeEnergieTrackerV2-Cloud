@@ -14,7 +14,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from cloud_browser import launch_context
+from cloud_browser import ensure_crm_login, launch_context
 from crm_sync import (
     LIST_URL,
     PROFILE_DIR,
@@ -666,6 +666,7 @@ def main() -> None:
         context = launch_context(playwright, PROFILE_DIR, {"width": 1490, "height": 995})
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=90_000)
+        ensure_crm_login(page, LIST_URL)
         open_list(page)
         set_100_rows(page)
         print_filter_diagnostic(page)
