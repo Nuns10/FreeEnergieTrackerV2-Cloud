@@ -731,21 +731,26 @@ def main() -> None:
         set_100_rows(page)
         print_filter_diagnostic(page)
         clear_status_filter(page)
+        unified_grid = (
+            page.get_by_role("combobox", name="Statut", exact=True).count() > 0
+            and page.locator("mat-form-field").filter(has_text=re.compile("Type de personne", re.I)).count() == 0
+        )
         # Valide d'abord les cohortes aval. En cas d'évolution du filtre CRM,
         # le diagnostic échoue immédiatement au lieu d'attendre les 172 pages.
         cohort_counts = {}
-        # Le nouveau filtre est à sélection simple : R1 et R2 sont collectés
-        # séparément puis additionnés pour conserver le même indicateur.
-        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1"}, {"R2"}, {"RDV ANNULE"}):
-            count = collect_status_cohort(page, wanted, synced_at)
-            cohort_counts["/".join(sorted(wanted))] = count
-        print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
+        if unified_grid:
+            print("Nouveau CRM unifié : validation des statuts après parcours complet de la grille.")
+        else:
+            for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1"}, {"R2"}, {"RDV ANNULE"}):
+                count = collect_status_cohort(page, wanted, synced_at)
+                cohort_counts["/".join(sorted(wanted))] = count
+            print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
         # Arrêt rapide de diagnostic : ne pas perdre vingt minutes à parcourir
         # le tunnel si les cohortes de référence ne sont pas encore complètes.
         signed = cohort_counts.get("SIGNE", 0)
         unpacked = cohort_counts.get("DEBALLE PAS SIGNE", 0)
         r1r2 = cohort_counts.get("R1", 0) + cohort_counts.get("R2", 0)
-        if not (580 <= signed <= 700 and 1050 <= unpacked <= 1250 and 110 <= r1r2 <= 180):
+        if not unified_grid and not (580 <= signed <= 700 and 1050 <= unpacked <= 1250 and 110 <= r1r2 <= 180):
             raise RuntimeError(
                 "Cohortes CRM incomplètes avant parcours général : "
                 f"SIGNÉ={signed}, DÉBALLÉ={unpacked}, R1/R2={r1r2}"
