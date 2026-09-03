@@ -360,7 +360,13 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
         select.first.click(force=True)
         page.wait_for_timeout(600)
         search = visible_search()
-        search.wait_for(state="visible", timeout=15_000)
+        # La nouvelle grille unifiée n'affiche plus systématiquement le champ
+        # de recherche. Dans ce cas, le parcours direct/scrollé ci-dessous
+        # suffit et ne doit pas bloquer toute la synchronisation.
+        if search.count() and search.is_visible():
+            search.wait_for(state="visible", timeout=3_000)
+        else:
+            print("Filtre Statut sans champ de recherche : parcours direct des options.")
 
     # La recherche intégrée est beaucoup plus fiable que le défilement du
     # panneau virtualisé : SIGNÉ se trouve hors de la portion initiale du DOM.
