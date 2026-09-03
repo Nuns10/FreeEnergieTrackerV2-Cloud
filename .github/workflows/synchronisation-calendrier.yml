@@ -42,7 +42,7 @@ jobs:
         run: python sync_worker/export_supabase_to_sqlite.py
 
       - name: Synchroniser les rendez-vous passés et à venir
-        run: python sync_worker/calendar_sync.py --weeks-back 8 --weeks-forward 8
+        run: python sync_worker/calendar_sync.py --weeks-back 2 --weeks-forward 2
 
       - name: Publier les rendez-vous dans Supabase
         run: python sync_worker/migrate_sqlite_to_supabase.py --replace sync_worker/data/leads.sqlite
