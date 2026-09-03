@@ -450,7 +450,6 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
                     page.wait_for_timeout(80)
                 print(f"Parcours clavier des statuts : {keyboard_labels}")
 
-    panel = page.locator(".cdk-overlay-pane .mat-select-panel, .cdk-overlay-pane [role='listbox']").first
     # Le menu est virtualisé/scrollable : SIGNÉ et DÉBALLÉ ne sont pas
     # forcément présents dans le DOM au premier affichage.
     for _scroll in range(30):
@@ -467,8 +466,13 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
                 page.wait_for_timeout(120)
         if wanted <= found:
             break
-        moved = panel.evaluate(
-            """el => {
+        moved = options.first.evaluate(
+            """option => {
+                let el = option.parentElement;
+                while (el && el !== document.body && el.scrollHeight <= el.clientHeight + 2) {
+                    el = el.parentElement;
+                }
+                if (!el || el === document.body) return false;
                 const before = el.scrollTop;
                 el.scrollTop = Math.min(el.scrollTop + Math.max(el.clientHeight * 0.8, 120), el.scrollHeight);
                 return el.scrollTop !== before;
