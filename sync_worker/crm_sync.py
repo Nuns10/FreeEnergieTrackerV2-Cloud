@@ -344,6 +344,12 @@ def extract_page_records(page: Page) -> list[dict[str, Any]]:
 
 
 def next_page(page: Page) -> bool:
+    # La nouvelle grille laisse parfois le bouton « suivant » actif sur la
+    # dernière page. Le texte du paginator reste la source fiable.
+    pagination = paginator_text(page)
+    numbers = [int(value.replace(" ", "")) for value in re.findall(r"\d[\d ]*", pagination)]
+    if len(numbers) >= 3 and numbers[-2] >= numbers[-1]:
+        return False
     button = page.locator(
         "button.mat-paginator-navigation-next, button.mat-mdc-paginator-navigation-next, "
         "button[aria-label='page suivante']"
