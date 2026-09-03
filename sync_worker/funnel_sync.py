@@ -280,8 +280,9 @@ def print_filter_diagnostic(page) -> None:
         }"""
     )
     print(f"Réponse selectlists/status_lead : {str(status_payload)[:12000]}")
-    other_status_payloads = page.evaluate(
-        """async () => {
+    try:
+        other_status_payloads = page.evaluate(
+            """async () => {
             const raw = localStorage.getItem('_token');
             let token = raw;
             try {
@@ -307,9 +308,15 @@ def print_filter_diagnostic(page) -> None:
                 }
             }
             return result;
-        }"""
-    )
-    print(f"Autres listes de statuts : {str(other_status_payloads)[:16000]}")
+            }"""
+        )
+        print(f"Autres listes de statuts : {str(other_status_payloads)[:16000]}")
+    except Exception as exc:
+        print(f"Diagnostic des listes de statuts ignoré : {type(exc).__name__}")
+    except Exception as exc:
+        # Ce bloc est uniquement informatif. Le nouveau CRM peut bloquer ces
+        # appels directs tout en alimentant normalement la grille authentifiée.
+        print(f"Diagnostic des listes de statuts ignoré : {type(exc).__name__}")
 
 
 def select_exact_statuses(page, wanted: set[str]) -> None:
