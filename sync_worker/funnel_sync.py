@@ -464,7 +464,10 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
             desired = label in wanted
             if desired:
                 found.add(label)
-            if option_is_selected(option) != desired:
+            # Ne jamais cliquer une option non désirée ici : le nouveau CRM
+            # utilise un menu à sélection simple et fermerait immédiatement
+            # le panneau en essayant de désélectionner sa valeur courante.
+            if desired and not option_is_selected(option):
                 option.click(force=True)
                 page.wait_for_timeout(120)
         if wanted <= found:
@@ -731,7 +734,9 @@ def main() -> None:
         # Valide d'abord les cohortes aval. En cas d'évolution du filtre CRM,
         # le diagnostic échoue immédiatement au lieu d'attendre les 172 pages.
         cohort_counts = {}
-        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1", "R2"}, {"RDV ANNULE"}):
+        # Le nouveau filtre est à sélection simple : R1 et R2 sont collectés
+        # séparément puis additionnés pour conserver le même indicateur.
+        for wanted in ({"SIGNE"}, {"DEBALLE PAS SIGNE"}, {"R1"}, {"R2"}, {"RDV ANNULE"}):
             count = collect_status_cohort(page, wanted, synced_at)
             cohort_counts["/".join(sorted(wanted))] = count
         print("Cohortes métier explicites : " + " | ".join(f"{k}={v}" for k, v in cohort_counts.items()))
@@ -739,7 +744,7 @@ def main() -> None:
         # le tunnel si les cohortes de référence ne sont pas encore complètes.
         signed = cohort_counts.get("SIGNE", 0)
         unpacked = cohort_counts.get("DEBALLE PAS SIGNE", 0)
-        r1r2 = cohort_counts.get("R1/R2", 0)
+        r1r2 = cohort_counts.get("R1", 0) + cohort_counts.get("R2", 0)
         if not (580 <= signed <= 700 and 1050 <= unpacked <= 1250 and 110 <= r1r2 <= 180):
             raise RuntimeError(
                 "Cohortes CRM incomplètes avant parcours général : "
