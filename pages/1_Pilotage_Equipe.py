@@ -324,7 +324,21 @@ team = pd.DataFrame(rows).sort_values(["Jours ratés", "Appels"], ascending=[Fal
 if "selected_person" not in st.session_state or st.session_state.selected_person not in people:
     st.session_state.selected_person = team.iloc[0]["Commercial"]
 
-latest_sync = pd.to_datetime(leads[sync_col], errors="coerce").max() if sync_col else pd.NaT
+sync_candidates = []
+for frame, names in (
+    (leads, ("synced_at", "updated_at")),
+    (raw_calls, ("synced_at", "updated_at")),
+    (raw_events, ("synced_at", "updated_at")),
+    (raw_daily, ("synced_at", "updated_at")),
+    (raw_funnel, ("synced_at", "updated_at")),
+    (raw_status_history, ("observed_at", "synced_at", "updated_at")),
+):
+    date_column = column(frame, *names)
+    if date_column and not frame.empty:
+        value = pd.to_datetime(frame[date_column], errors="coerce").max()
+        if pd.notna(value):
+            sync_candidates.append(value)
+latest_sync = max(sync_candidates) if sync_candidates else pd.NaT
 sync_text = latest_sync.strftime("%d/%m/%Y à %H:%M") if pd.notna(latest_sync) else "synchronisation cloud active"
 st.markdown(
     f"""
