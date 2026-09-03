@@ -10,6 +10,7 @@ import sqlite3
 import re
 import time
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -686,6 +687,21 @@ def save(rows: list[tuple]) -> None:
         connection.commit()
 
 
+def save_checkpoint(page_number: int, total: int, synced_at: str) -> None:
+    """Conserve une trace exploitable avec la base partielle en cas d'arrêt."""
+    checkpoint = DB_PATH.parent / "funnel_checkpoint.json"
+    temporary = checkpoint.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(
+            {"page": page_number, "rows_collected": total, "synced_at": synced_at},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(checkpoint)
+
+
 def next_page(page) -> bool:
     # La nouvelle grille ne marque plus toujours le bouton « suivant » comme
     # désactivé. Le libellé du paginator reste la source fiable pour détecter
@@ -774,6 +790,7 @@ def main() -> None:
                 raise RuntimeError(f"Aucun lead lisible à la page {page_number}.")
             save(rows)
             total += len(rows)
+            save_checkpoint(page_number, total, synced_at)
             print(f"Tunnel page {page_number}: {len(rows)} leads, total {total}.")
             if not next_page(page):
                 break
