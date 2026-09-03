@@ -687,6 +687,13 @@ def save(rows: list[tuple]) -> None:
 
 
 def next_page(page) -> bool:
+    # La nouvelle grille ne marque plus toujours le bouton « suivant » comme
+    # désactivé. Le libellé du paginator reste la source fiable pour détecter
+    # la dernière page (ex. « 19801 - 19827 de 19827 »).
+    pagination = paginator_text(page)
+    numbers = [int(value.replace(" ", "")) for value in re.findall(r"\d[\d ]*", pagination)]
+    if len(numbers) >= 3 and numbers[-2] >= numbers[-1]:
+        return False
     button = page.locator(
         "button.mat-paginator-navigation-next, button.mat-mdc-paginator-navigation-next, "
         "button[aria-label='page suivante']"

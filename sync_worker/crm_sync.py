@@ -84,7 +84,12 @@ def paginator_text(page: Page) -> str:
 
 
 def set_100_rows(page: Page) -> None:
-    select = page.locator('mat-select[aria-label="Résultat par page :"]')
+    select = page.locator(
+        'mat-select[aria-label="Résultat par page :"], '
+        'mat-select[aria-label*="page" i], '
+        '.mat-mdc-paginator-page-size-select mat-select, '
+        '.mat-paginator-page-size-select mat-select'
+    )
     if select.count() == 0:
         return
 
