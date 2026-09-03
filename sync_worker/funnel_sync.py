@@ -346,7 +346,10 @@ def select_exact_statuses(page, wanted: set[str]) -> None:
         ".cdk-overlay-pane .mat-select-search-inner-row .mat-pseudo-checkbox:visible, "
         ".cdk-overlay-pane ngx-mat-select-search .mat-checkbox:visible"
     ).last
-    if toggle_all.count():
+    # Le bouton global n'existe que dans l'ancien filtre multiple avec champ
+    # de recherche. Sur la nouvelle liste unifiée, une case voisine peut être
+    # prise à tort pour ce bouton et fermer le menu avant la sélection.
+    if search.count() and toggle_all.count():
         toggle_all.click(force=True)
         page.wait_for_timeout(250)
         # Selon l'état intermédiaire du filtre, ce clic ferme parfois le
