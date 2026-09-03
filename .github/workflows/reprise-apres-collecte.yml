@@ -38,7 +38,9 @@ jobs:
       - name: Restaurer la base sauvegardée
         run: |
           mkdir -p sync_worker/data
-          cp reprise/sync_worker/data/leads.sqlite sync_worker/data/leads.sqlite
+          saved_db="$(find reprise -type f -name leads.sqlite -print -quit)"
+          test -n "$saved_db"
+          cp "$saved_db" sync_worker/data/leads.sqlite
       - name: Synchroniser uniquement les leads et appels
         run: python sync_worker/crm_sync.py
       - name: Envoyer vers Supabase
