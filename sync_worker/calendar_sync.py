@@ -604,8 +604,8 @@ def sync_calendar(weeks_back: int = 8, weeks_forward: int = 8, interactive: bool
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weeks-back", "--weeks", dest="weeks_back", type=int, default=8)
-    parser.add_argument("--weeks-forward", type=int, default=8)
+    parser.add_argument("--weeks-back", "--weeks", dest="weeks_back", type=int, default=2)
+    parser.add_argument("--weeks-forward", type=int, default=2)
     parser.add_argument("--interactive", action="store_true")
     args = parser.parse_args()
     sync_calendar(max(args.weeks_back, 0), max(args.weeks_forward, 0), args.interactive)
