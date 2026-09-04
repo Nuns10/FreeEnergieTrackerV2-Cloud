@@ -775,9 +775,39 @@ def enrich_record(
     enriched["raw_detail_text"] = text
     return enriched, events
 
+
+def existing_records() -> list[dict[str, Any]]:
+    """Recharge les fiches déjà suivies sans reparcourir toute la grille CRM."""
+    import sqlite3
+
+    db_path = BASE_DIR / "data" / "leads.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT crm_id, date_creation, nom, code_postal, ville, statut,
+                   date_statut, source, intervenant, telephone
+            FROM leads
+            WHERE crm_id IS NOT NULL
+              AND TRIM(crm_id) <> ''
+              AND crm_id NOT LIKE 'fallback:%'
+            ORDER BY COALESCE(dernier_appel, date_statut, date_creation) DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            **dict(row),
+            "crm_id": str(row["crm_id"]),
+            "detail_url": f"{CRM_URL}/lead/{row['crm_id']}",
+        }
+        for row in rows
+    ]
+
 def sync(
     interactive: bool = False,
     max_leads: int | None = None,
+    existing_only: bool = False,
 ) -> None:
     completed: list[dict[str, Any]] = []
     pending_call_events: list[dict[str, Any]] = []
@@ -803,14 +833,26 @@ def sync(
             )
             open_list(list_page)
 
-        set_100_rows(list_page)
-        apply_target_statuses(list_page)
-
         detail_page = context.new_page()
+        if existing_only:
+            records = existing_records()
+            print(
+                f"Reprise ciblée : {len(records)} fiches déjà suivies, "
+                "sans reparcourir le tunnel complet."
+            )
+            record_pages = [records]
+        else:
+            set_100_rows(list_page)
+            apply_target_statuses(list_page)
+            record_pages = None
+
         page_number = 1
 
         while True:
-            records = extract_page_records(list_page)
+            if record_pages is not None:
+                records = record_pages[0]
+            else:
+                records = extract_page_records(list_page)
             print(
                 f"Page filtrée {page_number} : "
                 f"{len(records)} fiche(s) à traiter."
@@ -865,7 +907,7 @@ def sync(
             ):
                 break
 
-            if not next_page(list_page):
+            if record_pages is not None or not next_page(list_page):
                 break
 
             page_number += 1
@@ -890,9 +932,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--max-leads", type=int)
+    parser.add_argument("--existing-only", action="store_true")
     arguments = parser.parse_args()
 
     sync(
         interactive=arguments.interactive,
         max_leads=arguments.max_leads,
+        existing_only=arguments.existing_only,
     )
