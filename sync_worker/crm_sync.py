@@ -742,12 +742,25 @@ def enrich_record(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     print(f"Ouverture : {record.get('nom') or record['crm_id']}")
 
-    detail_page.goto(
-        record["detail_url"],
-        wait_until="domcontentloaded",
-        timeout=90_000,
-    )
-    detail_page.wait_for_timeout(1200)
+    for attempt in range(2):
+        detail_page.goto(
+            record["detail_url"],
+            wait_until="domcontentloaded",
+            timeout=90_000,
+        )
+        detail_page.wait_for_timeout(1200)
+
+        if "/lead/" in detail_page.url:
+            break
+
+        # Une collecte ciblée peut durer longtemps. La session CRM peut donc
+        # expirer en cours de parcours : se reconnecter puis retenter la fiche
+        # évite de conserver silencieusement les anciens appels/NRP.
+        if "/sign-in" in detail_page.url and attempt == 0:
+            print("Session CRM expirée pendant la collecte : reconnexion.")
+            ensure_crm_login(detail_page, record["detail_url"])
+            continue
+        break
 
     if "/lead/" not in detail_page.url:
         raise RuntimeError(
