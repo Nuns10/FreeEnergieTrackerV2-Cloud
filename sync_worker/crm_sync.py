@@ -854,6 +854,31 @@ def sync(
                 if record["crm_id"] == str(crm_id).strip()
             ]
             if not records:
+                # Les appels ne sont historisés que pour une partie des leads.
+                # Une fiche récente peut donc être absente de `leads` tout en
+                # étant bien présente dans le tunnel complet.
+                import sqlite3
+
+                db_path = BASE_DIR / "data" / "leads.sqlite"
+                with sqlite3.connect(db_path) as connection:
+                    connection.row_factory = sqlite3.Row
+                    row = connection.execute(
+                        """
+                        SELECT crm_id, date_creation, nom, code_postal, ville,
+                               statut, date_statut, source, intervenant, telephone
+                        FROM lead_funnel
+                        WHERE crm_id = ?
+                        LIMIT 1
+                        """,
+                        (str(crm_id).strip(),),
+                    ).fetchone()
+                if row:
+                    records = [{
+                        **dict(row),
+                        "crm_id": str(row["crm_id"]),
+                        "detail_url": f"{CRM_URL}/lead/{row['crm_id']}",
+                    }]
+            if not records:
                 raise RuntimeError(f"Lead CRM introuvable : {crm_id}")
             print(f"Actualisation ciblée du lead CRM {crm_id}.")
             record_pages = [records]
