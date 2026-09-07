@@ -3,7 +3,10 @@ name: Actualisation ciblée appels et NRP
 on:
   workflow_dispatch:
   schedule:
-    - cron: "20 4 * * *"
+    # Été (Paris) : 06:20, 08:20, 10:20, 12:20, 14:20, 16:20 et 18:20.
+    # La collecte dure environ 45 minutes ; ce rythme garde les indicateurs
+    # NRP à jour pendant la journée sans retraiter le tunnel ni le calendrier.
+    - cron: "20 4-16/2 * * 1-6"
 
 concurrency:
   group: synchronisation-appels-nrp
