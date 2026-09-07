@@ -2,6 +2,11 @@ name: Actualisation ciblée appels et NRP
 
 on:
   workflow_dispatch:
+    inputs:
+      crm_id:
+        description: "Identifiant d'un lead à actualiser immédiatement (facultatif)"
+        required: false
+        type: string
   schedule:
     # Été (Paris) : 06:20, 08:20, 10:20, 12:20, 14:20, 16:20 et 18:20.
     # La collecte dure environ 45 minutes ; ce rythme garde les indicateurs
@@ -9,7 +14,7 @@ on:
     - cron: "20 4-16/2 * * 1-6"
 
 concurrency:
-  group: synchronisation-appels-nrp
+  group: synchronisation-appels-nrp-${{ inputs.crm_id || 'global' }}
   cancel-in-progress: false
 
 jobs:
@@ -35,7 +40,12 @@ jobs:
       - name: Restaurer les données publiées
         run: python sync_worker/export_supabase_to_sqlite.py
       - name: Actualiser uniquement les appels et NRP
-        run: python sync_worker/crm_sync.py --existing-only
+        run: |
+          if [ -n "${{ inputs.crm_id }}" ]; then
+            python sync_worker/crm_sync.py --crm-id "${{ inputs.crm_id }}"
+          else
+            python sync_worker/crm_sync.py --existing-only
+          fi
       - name: Publier les données actualisées
         run: python sync_worker/migrate_sqlite_to_supabase.py --replace sync_worker/data/leads.sqlite
       - name: Conserver la reprise
