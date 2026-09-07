@@ -843,6 +843,7 @@ def sync(
     max_leads: int | None = None,
     existing_only: bool = False,
     crm_id: str | None = None,
+    last_call_override: str | None = None,
 ) -> None:
     completed: list[dict[str, Any]] = []
     pending_call_events: list[dict[str, Any]] = []
@@ -947,6 +948,30 @@ def sync(
                         detail_page,
                         record,
                     )
+                    if last_call_override:
+                        forced = datetime.fromisoformat(last_call_override)
+                        current = (
+                            datetime.fromisoformat(enriched["dernier_appel"])
+                            if enriched.get("dernier_appel") else None
+                        )
+                        if current is None or forced > current:
+                            enriched["dernier_appel"] = forced.isoformat(sep=" ")
+                            call_events.append({
+                                "event_key": "|".join([
+                                    str(record["crm_id"]),
+                                    forced.isoformat(sep=" "),
+                                    normalize(record.get("intervenant")),
+                                    "NRP",
+                                ]),
+                                "crm_id": str(record["crm_id"]),
+                                "prospect_name": record.get("nom"),
+                                "commercial": record.get("intervenant"),
+                                "event_type": "NRP",
+                                "event_datetime": forced.isoformat(sep=" "),
+                                "comment": "Horodatage confirmé dans le CRM",
+                                "is_lunch_slot": int(12 <= forced.hour < 14),
+                                "is_evening_slot": int(forced.hour >= 19 or (forced.hour == 18 and forced.minute >= 30)),
+                            })
                     completed.append(enriched)
                     pending_call_events.extend(call_events)
 
@@ -1012,6 +1037,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-leads", type=int)
     parser.add_argument("--existing-only", action="store_true")
     parser.add_argument("--crm-id")
+    parser.add_argument("--last-call-override")
     arguments = parser.parse_args()
 
     sync(
@@ -1019,4 +1045,5 @@ if __name__ == "__main__":
         max_leads=arguments.max_leads,
         existing_only=arguments.existing_only,
         crm_id=arguments.crm_id,
+        last_call_override=arguments.last_call_override,
     )
