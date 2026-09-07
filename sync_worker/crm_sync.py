@@ -767,6 +767,27 @@ def enrich_record(
             f"La fiche ne s’est pas ouverte : {detail_page.url}"
         )
 
+    # La nouvelle fiche CRM rend paresseusement les cartes d'historique :
+    # les événements les plus récents situés plus bas dans la page ne sont
+    # pas présents dans le DOM tant que les zones défilantes n'ont pas été
+    # parcourues. Sans cette étape, le « dernier NRP » peut rester ancien.
+    for _ in range(3):
+        detail_page.evaluate(
+            """() => {
+                window.scrollTo(0, document.body.scrollHeight);
+                for (const element of document.querySelectorAll('*')) {
+                    const style = getComputedStyle(element);
+                    if (
+                        element.scrollHeight > element.clientHeight + 80 &&
+                        ['auto', 'scroll'].includes(style.overflowY)
+                    ) {
+                        element.scrollTop = element.scrollHeight;
+                    }
+                }
+            }"""
+        )
+        detail_page.wait_for_timeout(350)
+
     text = history_text(detail_page)
     events = extract_call_events(detail_page, record)
 
