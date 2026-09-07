@@ -821,6 +821,7 @@ def sync(
     interactive: bool = False,
     max_leads: int | None = None,
     existing_only: bool = False,
+    crm_id: str | None = None,
 ) -> None:
     completed: list[dict[str, Any]] = []
     pending_call_events: list[dict[str, Any]] = []
@@ -847,7 +848,16 @@ def sync(
             open_list(list_page)
 
         detail_page = context.new_page()
-        if existing_only:
+        if crm_id:
+            records = [
+                record for record in existing_records()
+                if record["crm_id"] == str(crm_id).strip()
+            ]
+            if not records:
+                raise RuntimeError(f"Lead CRM introuvable : {crm_id}")
+            print(f"Actualisation ciblée du lead CRM {crm_id}.")
+            record_pages = [records]
+        elif existing_only:
             records = existing_records()
             print(
                 f"Reprise ciblée : {len(records)} fiches déjà suivies, "
@@ -946,10 +956,12 @@ if __name__ == "__main__":
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--max-leads", type=int)
     parser.add_argument("--existing-only", action="store_true")
+    parser.add_argument("--crm-id")
     arguments = parser.parse_args()
 
     sync(
         interactive=arguments.interactive,
         max_leads=arguments.max_leads,
         existing_only=arguments.existing_only,
+        crm_id=arguments.crm_id,
     )
