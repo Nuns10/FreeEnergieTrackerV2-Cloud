@@ -228,6 +228,7 @@ if not calls.empty:
     owner_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_person"].to_dict()
     calls["_id"] = calls[call_id].astype(str) if call_id else calls.index.astype(str)
     calls["_person"] = calls[call_person].fillna("").astype(str).map(clean) if call_person else ""
+    calls["_person"] = calls["_id"].map(owner_map).fillna(calls["_person"])
     invalid_person = calls["_person"].map(fake_person) | calls["_person"].map(norm).isin(EXCLUDED)
     calls.loc[invalid_person, "_person"] = calls.loc[invalid_person, "_id"].map(owner_map).fillna("")
     calls["_person_n"] = calls["_person"].map(norm)
