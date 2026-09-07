@@ -523,13 +523,12 @@ def extract_call_events(
                     }
                 }
 
-                const text = normalize(
-                    chosen ? chosen.innerText : nrpNode.innerText
-                );
+                const rawText = chosen ? chosen.innerText : nrpNode.innerText;
+                const text = normalize(rawText);
                 const dateMatch = text.match(datePattern);
 
                 // L'auteur est généralement le texte court avant NRP.
-                const pieces = text
+                const pieces = (rawText || '')
                     .split(/\\n|\\r/)
                     .map(normalize)
                     .filter(Boolean);
@@ -585,7 +584,16 @@ def extract_call_events(
         ]
 
         commercial = None
+        for index, piece in enumerate(pieces):
+            if normalize(piece) == "NRP" and index > 0:
+                candidate = clean(pieces[index - 1])
+                if 2 <= len(candidate) <= 80 and not re.search(r"\d{5,}", candidate):
+                    commercial = candidate
+                    break
+
         for piece in pieces:
+            if commercial is not None:
+                break
             normalized_piece = normalize(piece)
             if normalized_piece in {"NRP"}:
                 continue
@@ -647,8 +655,11 @@ def extract_call_events(
     return events
 
 
-def save_call_events(events: list[dict[str, Any]]) -> None:
-    if not events:
+def save_call_events(
+    events: list[dict[str, Any]],
+    refreshed_crm_ids: list[str] | None = None,
+) -> None:
+    if not events and not refreshed_crm_ids:
         return
 
     import sqlite3
@@ -657,6 +668,12 @@ def save_call_events(events: list[dict[str, Any]]) -> None:
     now = datetime.now().isoformat(sep=" ", timespec="seconds")
 
     with sqlite3.connect(db_path) as connection:
+        if refreshed_crm_ids:
+            placeholders = ",".join("?" for _ in refreshed_crm_ids)
+            connection.execute(
+                f"DELETE FROM call_events WHERE crm_id IN ({placeholders})",
+                [str(value) for value in refreshed_crm_ids],
+            )
         for event in events:
             connection.execute(
                 """
@@ -847,6 +864,7 @@ def sync(
 ) -> None:
     completed: list[dict[str, Any]] = []
     pending_call_events: list[dict[str, Any]] = []
+    pending_refreshed_ids: list[str] = []
     processed_ids: set[str] = set()
     ensure_call_events_table()
 
@@ -974,6 +992,7 @@ def sync(
                             })
                     completed.append(enriched)
                     pending_call_events.extend(call_events)
+                    pending_refreshed_ids.append(str(record["crm_id"]))
 
                     print(
                         f"[{len(completed)}] "
@@ -991,8 +1010,9 @@ def sync(
 
                 if len(completed) % 20 == 0:
                     upsert(pd.DataFrame(completed))
-                    save_call_events(pending_call_events)
+                    save_call_events(pending_call_events, pending_refreshed_ids)
                     pending_call_events.clear()
+                    pending_refreshed_ids.clear()
                     print(
                         f"Sauvegarde intermédiaire : "
                         f"{len(completed)} fiches."
@@ -1024,7 +1044,7 @@ def sync(
         )
 
     upsert(pd.DataFrame(completed))
-    save_call_events(pending_call_events)
+    save_call_events(pending_call_events, pending_refreshed_ids)
     print(
         f"Terminé : {len(completed)} fiches "
         f"PROSPECT À ATTRIBUER / À RELANCER synchronisées."
