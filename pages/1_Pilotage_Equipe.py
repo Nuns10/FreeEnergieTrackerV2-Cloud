@@ -228,14 +228,14 @@ if not calls.empty:
     owner_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_person"].to_dict()
     calls["_id"] = calls[call_id].astype(str) if call_id else calls.index.astype(str)
     calls["_person"] = calls[call_person].fillna("").astype(str).map(clean) if call_person else ""
-    # Le nouveau CRM ne fournit plus un auteur fiable dans toutes les cartes
-    # d'historique : ce texte peut être incomplet, ancien ou appartenir à un
-    # autre élément de la page. Pour les indicateurs par vendeur, la référence
-    # métier est le commercial actuellement affecté au lead.
+    # Conserver l'auteur historique de chaque action. Le propriétaire actuel
+    # du lead n'est qu'un secours lorsque l'auteur manque réellement : un lead
+    # peut avoir changé de commercial depuis ses anciens appels.
     assigned_owner = calls["_id"].map(owner_map).fillna("")
-    calls.loc[assigned_owner.ne(""), "_person"] = assigned_owner[assigned_owner.ne("")]
     invalid_person = calls["_person"].map(fake_person) | calls["_person"].map(norm).isin(EXCLUDED)
-    calls.loc[invalid_person, "_person"] = ""
+    fallback_owner = invalid_person & assigned_owner.ne("")
+    calls.loc[fallback_owner, "_person"] = assigned_owner[fallback_owner]
+    calls.loc[invalid_person & ~fallback_owner, "_person"] = ""
     calls["_person_n"] = calls["_person"].map(norm)
     calls["_dt"] = pd.to_datetime(calls[call_date], errors="coerce", dayfirst=True) if call_date else pd.NaT
     calls = calls[calls["_dt"].notna() & calls["_person"].ne("") & ~calls["_person_n"].isin(EXCLUDED)].copy()
