@@ -228,9 +228,14 @@ if not calls.empty:
     owner_map = leads.drop_duplicates("_id", keep="last").set_index("_id")["_person"].to_dict()
     calls["_id"] = calls[call_id].astype(str) if call_id else calls.index.astype(str)
     calls["_person"] = calls[call_person].fillna("").astype(str).map(clean) if call_person else ""
-    calls["_person"] = calls["_id"].map(owner_map).fillna(calls["_person"])
+    # Le nouveau CRM ne fournit plus un auteur fiable dans toutes les cartes
+    # d'historique : ce texte peut être incomplet, ancien ou appartenir à un
+    # autre élément de la page. Pour les indicateurs par vendeur, la référence
+    # métier est le commercial actuellement affecté au lead.
+    assigned_owner = calls["_id"].map(owner_map).fillna("")
+    calls.loc[assigned_owner.ne(""), "_person"] = assigned_owner[assigned_owner.ne("")]
     invalid_person = calls["_person"].map(fake_person) | calls["_person"].map(norm).isin(EXCLUDED)
-    calls.loc[invalid_person, "_person"] = calls.loc[invalid_person, "_id"].map(owner_map).fillna("")
+    calls.loc[invalid_person, "_person"] = ""
     calls["_person_n"] = calls["_person"].map(norm)
     calls["_dt"] = pd.to_datetime(calls[call_date], errors="coerce", dayfirst=True) if call_date else pd.NaT
     calls = calls[calls["_dt"].notna() & calls["_person"].ne("") & ~calls["_person_n"].isin(EXCLUDED)].copy()
@@ -454,8 +459,22 @@ st.markdown(
 
 last_nrp = pc["_dt"].max() if not pc.empty else pd.NaT
 last_nrp_name = prospect_map.get(str(pc.iloc[0]["_id"]), "Lead CRM") if not pc.empty else "Aucun prospect"
+# La fiche CRM porte aussi son dernier appel. Cette valeur est la référence
+# lorsque l'historique détaillé n'a pas encore chargé ou exposé sa carte la
+# plus récente dans la nouvelle interface.
+latest_lead = pl[pl["_last"].notna()].sort_values("_last", ascending=False)
+if not latest_lead.empty:
+    lead_last = latest_lead.iloc[0]["_last"]
+    if pd.isna(last_nrp) or lead_last > last_nrp:
+        last_nrp = lead_last
+        last_nrp_name = latest_lead.iloc[0]["_prospect"] or "Lead CRM"
 last_midday = midday["_dt"].max() if not midday.empty else pd.NaT
 last_evening = evening["_dt"].max() if not evening.empty else pd.NaT
+if pd.notna(last_nrp):
+    if 12 <= last_nrp.hour < 14 and (pd.isna(last_midday) or last_nrp > last_midday):
+        last_midday = last_nrp
+    if (last_nrp.hour * 60 + last_nrp.minute) >= 1110 and (pd.isna(last_evening) or last_nrp > last_evening):
+        last_evening = last_nrp
 i1, i2, i3, i4 = st.columns(4)
 cards = [
     (i1, "Dernier lead appelé en NRP", last_nrp.strftime("%d/%m/%Y · %H:%M") if pd.notna(last_nrp) else "Aucun historique", f"{last_nrp_name} · {int(row['Appels'])} NRP sur {period_label}"),
