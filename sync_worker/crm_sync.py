@@ -828,13 +828,32 @@ def enrich_record(
 
 
 def existing_records() -> list[dict[str, Any]]:
-    """Recharge les fiches déjà suivies sans reparcourir toute la grille CRM."""
+    """Recharge les fiches actives du tunnel et l'historique déjà suivi.
+
+    La table ``leads`` seule est un ancien sous-ensemble. Après l'évolution du
+    CRM, de nouveaux prospects (et donc leurs NRP récents) n'y entraient plus.
+    ``lead_funnel`` est désormais la source de vérité pour A RELANCER et
+    PROSPECT A ATTRIBUER ; l'ancien sous-ensemble est conservé en complément.
+    """
     import sqlite3
 
     db_path = BASE_DIR / "data" / "leads.sqlite"
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
-        rows = connection.execute(
+        funnel_rows = connection.execute(
+            """
+            SELECT crm_id, date_creation, nom, code_postal, ville, statut,
+                   date_statut, source, intervenant, telephone
+            FROM lead_funnel
+            WHERE crm_id IS NOT NULL
+              AND TRIM(crm_id) <> ''
+              AND crm_id NOT LIKE 'fallback:%'
+              AND REPLACE(UPPER(TRIM(COALESCE(statut, ''))), '_', ' ')
+                  IN ('A RELANCER', 'PROSPECT A ATTRIBUER')
+            ORDER BY COALESCE(date_statut, date_creation) DESC
+            """
+        ).fetchall()
+        legacy_rows = connection.execute(
             """
             SELECT crm_id, date_creation, nom, code_postal, ville, statut,
                    date_statut, source, intervenant, telephone
@@ -846,14 +865,23 @@ def existing_records() -> list[dict[str, Any]]:
             """
         ).fetchall()
 
-    return [
-        {
-            **dict(row),
-            "crm_id": str(row["crm_id"]),
-            "detail_url": f"{CRM_URL}/lead/{row['crm_id']}",
-        }
-        for row in rows
-    ]
+    # Le tunnel passe en premier afin d'utiliser le propriétaire et le nom
+    # actuels. Les anciennes fiches complètent la liste sans doublon.
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in [*funnel_rows, *legacy_rows]:
+        crm_id = str(row["crm_id"])
+        if crm_id not in by_id:
+            by_id[crm_id] = {
+                **dict(row),
+                "crm_id": crm_id,
+                "detail_url": f"{CRM_URL}/lead/{crm_id}",
+            }
+
+    print(
+        f"Candidats NRP : {len(funnel_rows)} actifs dans le tunnel + "
+        f"{len(legacy_rows)} historiques, {len(by_id)} uniques."
+    )
+    return list(by_id.values())
 
 def sync(
     interactive: bool = False,
