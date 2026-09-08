@@ -14,7 +14,10 @@ CRM_BASE_URL = "https://crm.freeenergie.fr"
 def launch_context(playwright, profile_dir: Path, viewport: dict):
     if not os.getenv("GITHUB_ACTIONS"):
         return playwright.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir), headless=False, viewport=viewport
+            user_data_dir=str(profile_dir),
+            headless=False,
+            viewport=viewport,
+            timezone_id="Europe/Paris",
         )
 
     encoded = os.getenv("CRM_STORAGE_STATE_B64", "").strip()
@@ -22,7 +25,15 @@ def launch_context(playwright, profile_dir: Path, viewport: dict):
         raise RuntimeError("Secret GitHub CRM_STORAGE_STATE_B64 absent")
     state = json.loads(base64.b64decode(encoded).decode("utf-8"))
     browser = playwright.chromium.launch(headless=True)
-    return browser.new_context(storage_state=state, viewport=viewport)
+    # GitHub Actions fonctionne en UTC. Le CRM formate ses horodatages selon
+    # le fuseau du navigateur : sans cette option, un appel affiché à 12:05 en
+    # France était collecté à 10:05 et faussait les créneaux midi/soir.
+    return browser.new_context(
+        storage_state=state,
+        viewport=viewport,
+        timezone_id="Europe/Paris",
+        locale="fr-FR",
+    )
 
 
 def ensure_crm_login(page, target_url: str) -> None:
